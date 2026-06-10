@@ -84,6 +84,20 @@ test("frontend env example documents WalletConnect project id", () => {
   );
 });
 
+test("frontend README documents MiniPay mobile release checks", () => {
+  const source = readFileSync(path.join(frontendRoot, "README.md"), "utf8");
+
+  for (const claim of [
+    "Open the deployed Mini App inside MiniPay.",
+    "Celo mainnet `42220`",
+    "manual desktop Connect Wallet button is hidden",
+    "live\n   `LangclawUsageVault`",
+    "Proof Center\n   proof metadata",
+  ]) {
+    assert.ok(source.includes(claim), `Expected MiniPay QA doc to include ${claim}`);
+  }
+});
+
 test("MiniPay sidebar hides the manual Connect Wallet button", () => {
   const source = readFileSync(appSidebarPath, "utf8");
   const miniPayBranchIndex = source.indexOf(": isMiniPay ? (");

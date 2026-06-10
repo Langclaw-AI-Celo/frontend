@@ -118,6 +118,18 @@ Research requests require a connected wallet and linked Telegram account. If the
 wallet session is missing, the UI should ask the user to connect/sign. If
 Telegram is missing, the Telegram connect dialog should handle the link flow.
 
+MiniPay release checks should verify the mobile path instead of only a desktop
+wallet path:
+
+1. Open the deployed Mini App inside MiniPay.
+2. Confirm the app resolves to Celo mainnet `42220`.
+3. Confirm the manual desktop Connect Wallet button is hidden in the MiniPay
+   sidebar state.
+4. Open `/usage` and verify the Celo USDT credit path points at the live
+   `LangclawUsageVault`.
+5. Run a Celo Intelligence prompt and confirm the result can show Proof Center
+   proof metadata when backend anchoring is configured.
+
 ## Usage Credits
 
 Celo Intelligence requests reserve and settle the user's internal selected-chain

@@ -174,17 +174,17 @@ Celo agent identity:
 Latest ERC-8004 Celo decision proof:
 
 ```text
-Decision #38
+Decision #47
 Signal: campaign-backend-proof
 Agent: 9109
-Tx: 0x4485061e6e6151bc51c106f025b7d062468121595ca5cb4198f7307ea5ec5f06
+Tx: 0xb50e7bd12af0cbca9a6246a80f1976da753d359fbd1553458712b43aa40681b1
 ```
 
 Latest ERC-8004 proof run:
 
 ```text
-Run: github-backend-650d33c-2026-06-06
-Evidence: https://github.com/Langclaw-AI-Celo/backend/commit/650d33c80a2a54c5a706c79722a6eeeaa5dd4fd8
+Run: github-backend-433b125-2026-06-08
+Evidence: https://github.com/Langclaw-AI-Celo/backend/commit/433b12562c6472dae9e3ff5a1286596a0420eaeb
 ```
 
 Latest Self-linked Celo decision proof:
@@ -196,8 +196,8 @@ Agent: 133
 Tx: 0x2a2f94c40e2b5c080bd330f43f3ce6bc6b05e054b6626ce3ab2716220f0d3211
 ```
 
-As of the 2026-06-07 backend proof-readiness recheck, the latest public Celo
-decision is now decision `#38` for ERC-8004 agent `9109`. Local clones now
+As of the 2026-06-10 backend proof-readiness recheck, the latest public Celo
+decision is now decision `#47` for ERC-8004 agent `9109`. Local clones now
 report `ready` when the preferred proof agent is the ERC-8004 campaign agent.
 Self Agent ID `133` remains available for linked-proof and human-verification
 flows without becoming the default campaign proof writer.
@@ -206,7 +206,7 @@ Strategy Lab journal proofs are configured against the live backend deployments.
 Local clones without `{MANTLE,CELO}_LANGCLAW_TRADING_JOURNAL_ADDRESS` still run
 backtests, but Proof Center should honestly show the journal as not configured.
 
-The 2026-06-07 backend proof-readiness check now returns `ready` because the
+The 2026-06-10 backend proof-readiness check now returns `ready` because the
 default proof path prefers the ERC-8004 campaign agent `9109`. Self Agent ID
 `133` remains documented for linked-proof and human-verification flows. RPC
 connectivity, gas balance, and registry readability all passed.

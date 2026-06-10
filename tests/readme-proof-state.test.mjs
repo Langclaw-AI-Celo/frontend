@@ -25,4 +25,9 @@ test("frontend README documents the latest proof run and ready semantics", () =>
     /report `ready`[\s\S]*Self Agent ID `133` remains available/,
     "Expected the README to explain the preferred-agent ready semantics."
   );
+  assert.match(
+    source,
+    /single-root workspace[\s\S]*`backend`, `contracts`, and `.github`/,
+    "Expected the README to document the current local workspace shape."
+  );
 });

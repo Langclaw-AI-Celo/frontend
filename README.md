@@ -20,6 +20,10 @@ The app is analysis-first. It does not execute live-funds trades.
 
 ## Local Setup
 
+This folder is tracked inside the Langclaw Celo single-root workspace alongside
+`backend`, `contracts`, and `.github`. Run git status, diff, and commits from
+the workspace root when coordinating campaign changes across surfaces.
+
 ```bash
 cp .env.example .env.local
 pnpm install

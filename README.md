@@ -22,7 +22,9 @@ The app is analysis-first. It does not execute live-funds trades.
 
 This folder is tracked inside the Langclaw Celo single-root workspace alongside
 `backend`, `contracts`, and `.github`. Run git status, diff, and commits from
-the workspace root when coordinating campaign changes across surfaces.
+the workspace root when coordinating campaign changes across surfaces. To satisfy
+local eligibility checks, ensure the workspace root contains the remote origin
+pointing to the public organization repository.
 
 ```bash
 cp .env.example .env.local

@@ -40,19 +40,17 @@ Default frontend env:
 ```bash
 NEXT_PUBLIC_LANGCLAW_API_URL=/api/backend
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=
+LANGCLAW_BACKEND_REWRITE_URL=http://43.129.56.85/celo
+```
+
+If the backend is running locally on the VPS Celo port, set:
+
+```bash
 LANGCLAW_BACKEND_REWRITE_URL=http://127.0.0.1:3002
 ```
 
-If the backend is running with its package default (`npm run dev`, port `3001`),
-set:
-
-```bash
-LANGCLAW_BACKEND_REWRITE_URL=http://127.0.0.1:3001
-```
-
 On Vercel, `LANGCLAW_BACKEND_REWRITE_URL` must be a public Celo backend URL or a
-domain that proxies to the VPS backend. Do not point a deployed HTTPS frontend
-at a private localhost or plain HTTP-only backend.
+domain that proxies to the VPS backend.
 
 ## Model Contract
 

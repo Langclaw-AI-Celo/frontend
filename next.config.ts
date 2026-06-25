@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const backendRewriteDestination = (
-  process.env.LANGCLAW_BACKEND_REWRITE_URL || "http://127.0.0.1:3002"
+  process.env.LANGCLAW_BACKEND_REWRITE_URL || "http://43.129.56.85/celo"
 ).replace(/\/+$/, "");
 
 const securityHeaders = [
@@ -17,7 +17,7 @@ const securityHeaders = [
       "font-src 'self' data:",
       "style-src 'self' 'unsafe-inline'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "connect-src 'self' http://localhost:3001 https: wss:",
+      "connect-src 'self' http://localhost:3001 http://43.129.56.85 https: wss:",
       "frame-src 'self' https:",
       "worker-src 'self' blob:",
     ].join("; "),

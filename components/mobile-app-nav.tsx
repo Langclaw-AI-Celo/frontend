@@ -51,9 +51,8 @@ export function MobileAppNav() {
       <div className="mx-auto flex max-w-md items-center gap-1">
         <button
           aria-label="Open menu"
-          className="flex min-w-0 flex-1 touch-manipulation flex-col items-center gap-1 rounded-md px-2 py-1.5 text-[11px] leading-none text-muted-foreground"
+          className="flex min-h-11 min-w-0 flex-1 touch-manipulation flex-col items-center gap-1 rounded-md px-2 py-1.5 text-[11px] leading-none text-muted-foreground"
           onClick={() => setOpenMobile(true)}
-          onTouchEnd={() => setOpenMobile(true)}
           type="button"
         >
           <PanelLeftIcon className="size-5" />
@@ -68,7 +67,7 @@ export function MobileAppNav() {
             <Link
               aria-current={isActive ? "page" : undefined}
               className={cn(
-                "flex min-w-0 flex-1 flex-col items-center gap-1 rounded-md px-2 py-1.5 text-[11px] leading-none text-muted-foreground",
+                "flex min-h-11 min-w-0 flex-1 touch-manipulation flex-col items-center gap-1 rounded-md px-2 py-1.5 text-[11px] leading-none text-muted-foreground",
                 isActive && "bg-primary/10 text-primary",
               )}
               href={item.href}

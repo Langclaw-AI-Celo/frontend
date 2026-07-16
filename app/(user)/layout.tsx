@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { MobileAppNav } from "@/components/mobile-app-nav";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -27,13 +28,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <UserUsageBar />
               </div>
             </div> */}
-            <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-1 flex-col px-4 py-8 md:px-6">
-              <SidebarTrigger className="mb-4 md:hidden" />
+            <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-1 flex-col px-4 pt-8 pb-[calc(6rem+env(safe-area-inset-bottom))] md:px-6 md:py-8">
               {children}
             </div>
           </>
         )}
       </main>
+      {isChatSession ? null : <MobileAppNav />}
     </SidebarProvider>
   );
 }

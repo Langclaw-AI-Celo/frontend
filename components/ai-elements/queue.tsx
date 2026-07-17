@@ -7,6 +7,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { RuntimeImage } from "@/components/ui/runtime-image";
 import { cn } from "@/lib/utils";
 import { ChevronDownIcon, PaperclipIcon } from "lucide-react";
 import type { ComponentProps } from "react";
@@ -148,15 +149,16 @@ export const QueueItemAttachment = ({
 export type QueueItemImageProps = ComponentProps<"img">;
 
 export const QueueItemImage = ({
+  alt = "",
   className,
   ...props
 }: QueueItemImageProps) => (
-  <img
-    alt=""
+  <RuntimeImage
+    {...props}
+    alt={alt}
     className={cn("h-8 w-8 rounded border object-cover", className)}
     height={32}
     width={32}
-    {...props}
   />
 );
 

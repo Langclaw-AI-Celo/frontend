@@ -15,6 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { RuntimeImage } from "@/components/ui/runtime-image";
 import { cn } from "@/lib/utils";
 import type { ComponentProps, ReactNode } from "react";
 
@@ -178,7 +179,7 @@ export const ModelSelectorLogo = ({
   className,
   ...props
 }: ModelSelectorLogoProps) => (
-  <img
+  <RuntimeImage
     {...props}
     alt={`${provider} logo`}
     className={cn("size-3 dark:invert", className)}

@@ -6,6 +6,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import { RuntimeImage } from "@/components/ui/runtime-image";
 import { cn } from "@/lib/utils";
 import type { FileUIPart, SourceDocumentUIPart } from "ai";
 import {
@@ -91,7 +92,7 @@ const renderAttachmentImage = (
   isGrid: boolean,
 ) =>
   isGrid ? (
-    <img
+    <RuntimeImage
       alt={filename || "Image"}
       className="size-full object-cover"
       height={96}
@@ -99,7 +100,7 @@ const renderAttachmentImage = (
       width={96}
     />
   ) : (
-    <img
+    <RuntimeImage
       alt={filename || "Image"}
       className="size-full rounded object-cover"
       height={20}

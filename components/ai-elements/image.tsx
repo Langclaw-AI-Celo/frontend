@@ -1,3 +1,4 @@
+import { RuntimeImage } from "@/components/ui/runtime-image";
 import { cn } from "@/lib/utils";
 import type { Experimental_GeneratedImage } from "ai";
 
@@ -7,17 +8,16 @@ export type ImageProps = Experimental_GeneratedImage & {
 };
 
 export const Image = ({
+  alt,
   base64,
-  uint8Array: _uint8Array,
+  className,
   mediaType,
-  ...props
 }: ImageProps) => (
-  <img
-    {...props}
-    alt={props.alt}
+  <RuntimeImage
+    alt={alt ?? ""}
     className={cn(
       "h-auto max-w-full overflow-hidden rounded-md",
-      props.className
+      className
     )}
     src={`data:${mediaType};base64,${base64}`}
   />

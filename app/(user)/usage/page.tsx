@@ -1353,6 +1353,7 @@ function CopyField({
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className="text-muted-foreground text-xs">{label}</span>
         <Button
+          aria-label={copied === label ? `${label} copied` : `Copy ${label}`}
           disabled={!value}
           onClick={() => void handleCopy()}
           size="icon-xs"

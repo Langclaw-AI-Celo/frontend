@@ -23,6 +23,7 @@ import {
   isMiniPayProvider,
   MINIPAY_CHAIN_ID,
 } from "@/lib/minipay";
+import { parseCachedWalletAuth } from "@/lib/wallet-auth-cache";
 
 export const WALLET_AUTH_UPDATED_EVENT = "langclaw-wallet-auth-updated";
 export const MINIPAY_SESSION_REQUIRED_MESSAGE =
@@ -31,7 +32,6 @@ export const MINIPAY_SIGNATURE_UNAVAILABLE_MESSAGE =
   "MiniPay does not use wallet signature prompts for this action. Use a browser wallet outside MiniPay for signature-only actions.";
 
 const WALLET_AUTH_STORAGE_PREFIX = "langclaw.walletSession.v2";
-const SESSION_REFRESH_MARGIN_MS = 60 * 1000;
 const inFlightSessionAuth = new Map<string, Promise<WalletAuth>>();
 
 type WalletAuthOptions = {
@@ -188,38 +188,7 @@ export function readCachedWalletAuth(
     getWalletAuthStorageKey(address, chain.id),
   );
 
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<WalletAuth>;
-
-    if (
-      typeof parsed.address !== "string" ||
-      typeof parsed.sessionExpiresAt !== "string" ||
-      typeof parsed.sessionToken !== "string"
-    ) {
-      return null;
-    }
-
-    if (parsed.address.toLowerCase() !== address.toLowerCase()) {
-      return null;
-    }
-
-    const expiresAt = new Date(parsed.sessionExpiresAt).getTime();
-
-    if (
-      Number.isNaN(expiresAt) ||
-      expiresAt - Date.now() <= SESSION_REFRESH_MARGIN_MS
-    ) {
-      return null;
-    }
-
-    return parsed as WalletAuth;
-  } catch {
-    return null;
-  }
+  return parseCachedWalletAuth(raw, address);
 }
 
 function writeCachedWalletAuth(walletAuth: WalletAuth, chain: ProductChainId) {

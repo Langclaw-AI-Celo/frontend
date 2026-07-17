@@ -64,6 +64,7 @@
   },
   "pnpm": {
     "overrides": {
+      "@babel/core": "7.29.6",
       "dompurify": "3.4.11",
       "js-yaml": "4.2.0",
       "qs": "6.15.2",

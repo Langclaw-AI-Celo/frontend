@@ -7,6 +7,7 @@ settings:
 overrides:
   dompurify: 3.4.11
   qs: 6.15.2
+  ua-parser-js: 2.0.10
 
 importers:
 
@@ -4738,8 +4739,8 @@ packages:
   ua-is-frozen@0.1.2:
     resolution: {integrity: sha512-RwKDW2p3iyWn4UbaxpP2+VxwqXh0jpvdxsYpZ5j/MLLiQOfbsV5shpgQiw93+KMYQPcteeMQ289MaAFzs3G9pw==}
 
-  ua-parser-js@2.0.9:
-    resolution: {integrity: sha512-OsqGhxyo/wGdLSXMSJxuMGN6H4gDnKz6Fb3IBm4bxZFMnyy0sdf6MN96Ie8tC6z/btdO+Bsy8guxlvLdwT076w==}
+  ua-parser-js@2.0.10:
+    resolution: {integrity: sha512-t+3Ktbq0Ies2vaSezfOaWiolH4OigQIO1dk+1xDpOydB1COVPocVYOrEV5rqZ0kFY9XYG1v9LutCyMgYBpABcw==}
     hasBin: true
 
   uc.micro@1.0.6:
@@ -6312,7 +6313,7 @@ snapshots:
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
       react-remove-scroll: 2.7.2(@types/react@19.2.14)(react@19.2.4)
-      ua-parser-js: 2.0.9
+      ua-parser-js: 2.0.10
       viem: 2.55.2(typescript@5.9.3)(zod@4.4.3)
       wagmi: 3.6.14(@tanstack/query-core@5.100.10)(@tanstack/react-query@5.100.10(react@19.2.4))(@types/react@19.2.14)(immer@11.1.8)(react@19.2.4)(typescript@5.9.3)(viem@2.55.2(typescript@5.9.3)(zod@4.4.3))
     transitivePeerDependencies:
@@ -10352,7 +10353,7 @@ snapshots:
 
   ua-is-frozen@0.1.2: {}
 
-  ua-parser-js@2.0.9:
+  ua-parser-js@2.0.10:
     dependencies:
       detect-europe-js: 0.1.2
       is-standalone-pwa: 0.1.1

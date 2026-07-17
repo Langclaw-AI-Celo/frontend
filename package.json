@@ -65,7 +65,8 @@
   "pnpm": {
     "overrides": {
       "dompurify": "3.4.11",
-      "qs": "6.15.2"
+      "qs": "6.15.2",
+      "ua-parser-js": "2.0.10"
     }
   }
 }

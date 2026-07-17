@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 
-import { type RouterModel } from "@/lib/langclaw-api";
+import type { RouterModel } from "../lib/langclaw-api.ts";
 
 export const DEFAULT_CHAT_MODEL_ID = "gpt-5-mini";
 export const DEFAULT_AGENT_MODEL_ID = "gpt-5.2";

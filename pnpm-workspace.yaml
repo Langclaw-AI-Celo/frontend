@@ -3,3 +3,7 @@ ignoredBuiltDependencies:
   - unrs-resolver
 onlyBuiltDependencies:
   - msw
+overrides:
+  hono: ^4.12.25
+  linkify-it: ^5.0.1
+  postcss: ^8.5.14

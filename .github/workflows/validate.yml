@@ -33,7 +33,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit dependencies
-        run: pnpm audit --audit-level=low
+        run: corepack pnpm@10.33.2 audit:dependencies
 
       - name: Lint
         run: pnpm lint

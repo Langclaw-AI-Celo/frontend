@@ -2277,11 +2277,14 @@ function buildMemoryStats(memories: MemoryItem[]): MemoryStats {
 export function readFriendlyError(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
   const status = error instanceof LangclawApiError ? error.status : 0;
+  const insufficientBalanceSymbol = readInsufficientBalanceSymbol(message);
 
-  if (status === 402 || /insufficient\s+(mnt|usdt|celo)\s+balance/i.test(message)) {
-    const symbol = /(?:usdt|celo)/i.test(message) ? "USDT" : "MNT";
+  if (insufficientBalanceSymbol) {
+    return `Insufficient ${insufficientBalanceSymbol} balance. Add ${insufficientBalanceSymbol} credits before running this request.`;
+  }
 
-    return `Insufficient ${symbol} balance. Add ${symbol} credits before running this request.`;
+  if (status === 402) {
+    return "Insufficient usage balance. Add credits before running this request.";
   }
 
   if (
@@ -2313,6 +2316,12 @@ export function readFriendlyError(error: unknown, fallback: string) {
   }
 
   return message || fallback;
+}
+
+function readInsufficientBalanceSymbol(message: string) {
+  const match = message.match(/insufficient\s+(mnt|usdt|celo)\s+balance/i);
+
+  return match?.[1]?.toUpperCase() ?? "";
 }
 
 export function isWalletSignatureRequiredError(error: unknown) {

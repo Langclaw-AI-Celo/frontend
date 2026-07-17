@@ -64,7 +64,8 @@
   },
   "pnpm": {
     "overrides": {
-      "dompurify": "3.4.11"
+      "dompurify": "3.4.11",
+      "qs": "6.15.2"
     }
   }
 }

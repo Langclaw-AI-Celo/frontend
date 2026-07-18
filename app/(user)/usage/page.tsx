@@ -738,14 +738,19 @@ export default function UsagePage() {
 
     try {
       await switchChainAsync?.({ chainId: chainConfig.chainId });
-      const hash = await writeWithdrawAsync({
+      const withdrawalRequest = withCeloAttribution(selectedChain, {
         abi: usageVaultAbi,
         address: vaultAddress,
         args: [withdrawalAmount],
         chainId: chainConfig.chainId,
         functionName: "withdraw",
         ...(feeCurrencyAddress ? { feeCurrency: feeCurrencyAddress } : {}),
-      } as unknown as Parameters<typeof writeWithdrawAsync>[0]);
+      });
+      const hash = await writeWithdrawAsync(
+        withdrawalRequest as unknown as Parameters<
+          typeof writeWithdrawAsync
+        >[0],
+      );
 
       setWithdrawHash(hash);
       toast.success("Withdrawal transaction sent", {

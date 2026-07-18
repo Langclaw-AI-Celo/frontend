@@ -33,3 +33,12 @@ test("native deposit sends a Celo-attributed write request", () => {
     /const nativeDepositRequest = withCeloAttribution\([\s\S]*?functionName: "deposit"[\s\S]*?writeDepositAsync\(\s*nativeDepositRequest/,
   );
 });
+
+test("withdrawal sends a Celo-attributed write request", () => {
+  const source = readFileSync(usagePagePath, "utf8");
+
+  assert.match(
+    source,
+    /const withdrawalRequest = withCeloAttribution\([\s\S]*?functionName: "withdraw"[\s\S]*?writeWithdrawAsync\(\s*withdrawalRequest/,
+  );
+});

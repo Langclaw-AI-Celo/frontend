@@ -15,3 +15,12 @@ test("token approval sends a Celo-attributed write request", () => {
     /const approvalRequest = withCeloAttribution\([\s\S]*?functionName: "approve"[\s\S]*?writeApproveAsync\(\s*approvalRequest/,
   );
 });
+
+test("token deposit sends a Celo-attributed write request", () => {
+  const source = readFileSync(usagePagePath, "utf8");
+
+  assert.match(
+    source,
+    /const tokenDepositRequest = withCeloAttribution\([\s\S]*?functionName: "depositTokenAmount"[\s\S]*?writeDepositAsync\(\s*tokenDepositRequest/,
+  );
+});

@@ -615,16 +615,24 @@ export default function UsagePage() {
         }
       }
 
-      const hash = isTokenBilling
-        ? await writeDepositAsync({
-            abi: usageVaultAbi,
-            address: validatedVaultAddress as `0x${string}`,
-            args: [depositReference as `0x${string}`, depositAmount],
-            chainId: chainConfig.chainId,
-            functionName: "depositTokenAmount",
-            ...celoFeeRequest,
-          } as unknown as Parameters<typeof writeDepositAsync>[0])
-        : await writeDepositAsync({
+      let hash: Hash;
+
+      if (isTokenBilling) {
+        const tokenDepositRequest = withCeloAttribution(selectedChain, {
+          abi: usageVaultAbi,
+          address: validatedVaultAddress as `0x${string}`,
+          args: [depositReference as `0x${string}`, depositAmount],
+          chainId: chainConfig.chainId,
+          functionName: "depositTokenAmount",
+          ...celoFeeRequest,
+        });
+        hash = await writeDepositAsync(
+          tokenDepositRequest as unknown as Parameters<
+            typeof writeDepositAsync
+          >[0],
+        );
+      } else {
+        hash = await writeDepositAsync({
             abi: usageVaultAbi,
             address: validatedVaultAddress as `0x${string}`,
             args: [depositReference as `0x${string}`],
@@ -633,6 +641,7 @@ export default function UsagePage() {
             value: depositAmount,
             ...celoFeeRequest,
           } as unknown as Parameters<typeof writeDepositAsync>[0]);
+      }
 
       setDepositHash(hash);
       setTxHash(hash);

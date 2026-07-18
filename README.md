@@ -40,6 +40,8 @@ Default frontend env:
 ```bash
 NEXT_PUBLIC_LANGCLAW_API_URL=/api/backend
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=
+NEXT_PUBLIC_CELO_ATTRIBUTION_HOSTNAME=langclawcelo.vercel.app
+NEXT_PUBLIC_CELO_ATTRIBUTION_CODE=
 LANGCLAW_BACKEND_REWRITE_URL=http://43.129.56.85/celo
 ```
 
@@ -51,6 +53,26 @@ LANGCLAW_BACKEND_REWRITE_URL=http://127.0.0.1:3002
 
 On Vercel, `LANGCLAW_BACKEND_REWRITE_URL` must be a public Celo backend URL or a
 domain that proxies to the VPS backend.
+
+## Celo Transaction Attribution
+
+The frontend adds an ERC-8021 suffix to Celo credit approvals, deposits, and
+withdrawals. It derives the hostname code from
+`NEXT_PUBLIC_CELO_ATTRIBUTION_HOSTNAME`. The default hostname is
+`langclawcelo.vercel.app`.
+
+The suffix puts the hostname code first. It adds a valid
+`NEXT_PUBLIC_CELO_ATTRIBUTION_CODE` as the official code second. Leave that
+variable empty until the program issues a code. MiniPay adds its own platform
+code. Langclaw does not add `minipay`.
+
+Mantle transactions remain unchanged. After a Celo receipt confirms, the app
+reads its calldata and checks the configured codes. A failed check warns the
+user. It does not stop deposit crediting or balance refreshes.
+
+The hostname code works now, but the reward program only credits an official
+code issued by the program. See the
+[Celo Attribution Tags documentation](https://docs.celo.org/build-on-celo/attribution-tags).
 
 ## Model Contract
 

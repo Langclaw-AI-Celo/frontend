@@ -1039,12 +1039,14 @@ export default function UsagePage() {
           <CardContent className="flex flex-col gap-4">
             <div className="grid gap-3 lg:grid-cols-[0.75fr_1.25fr]">
               <div className="flex flex-col gap-2">
-                <label className="text-sm">
+                <label className="text-sm" htmlFor="deposit-amount">
                   <span className="mb-1 block text-muted-foreground">
                     Amount
                   </span>
                   <Input
+                    id="deposit-amount"
                     inputMode="decimal"
+                    name="depositAmount"
                     onChange={(event) =>
                       setDepositAmount(event.currentTarget.value)
                     }
@@ -1147,16 +1149,36 @@ export default function UsagePage() {
             </CardAction>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            <Input
-              onChange={(event) => setTxHash(event.currentTarget.value)}
-              placeholder="0x transaction hash"
-              value={txHash}
-            />
-            <Input
-              onChange={(event) => setReference(event.currentTarget.value)}
-              placeholder="reference (optional for receive deposits)"
-              value={reference}
-            />
+            <div className="flex flex-col gap-1">
+              <label
+                className="text-muted-foreground text-sm"
+                htmlFor="existing-deposit-hash"
+              >
+                Transaction hash
+              </label>
+              <Input
+                id="existing-deposit-hash"
+                name="existingDepositHash"
+                onChange={(event) => setTxHash(event.currentTarget.value)}
+                placeholder="0x transaction hash"
+                value={txHash}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label
+                className="text-muted-foreground text-sm"
+                htmlFor="existing-deposit-reference"
+              >
+                Reference
+              </label>
+              <Input
+                id="existing-deposit-reference"
+                name="existingDepositReference"
+                onChange={(event) => setReference(event.currentTarget.value)}
+                placeholder="reference (optional for receive deposits)"
+                value={reference}
+              />
+            </div>
             <p className="text-muted-foreground text-xs">
               Use this for deposits sent outside the app. If you used a
               reference, paste the same value.
@@ -1205,12 +1227,14 @@ export default function UsagePage() {
             </CardAction>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
-            <label className="text-sm">
+            <label className="text-sm" htmlFor="withdraw-amount">
               <span className="mb-1 block text-muted-foreground">
                 Amount to withdraw
               </span>
               <Input
+                id="withdraw-amount"
                 inputMode="decimal"
+                name="withdrawAmount"
                 onChange={(event) =>
                   setWithdrawAmount(event.currentTarget.value)
                 }
@@ -1276,7 +1300,13 @@ export default function UsagePage() {
               label="Withdrawal authority"
               value={String(withdrawalAuthorityData ?? "")}
             />
-            <div className="flex flex-wrap items-center gap-2">
+            <div
+              aria-atomic="true"
+              aria-label="Withdrawal transaction status"
+              aria-live="polite"
+              className="flex flex-wrap items-center gap-2"
+              role="status"
+            >
               <StatusBadge
                 label={
                   isLoadingVaultPaused
@@ -1454,7 +1484,13 @@ function DepositStatus({
   }
 
   return (
-    <div className="rounded-md border bg-muted/30 p-3 text-sm">
+    <div
+      aria-atomic="true"
+      aria-label="Deposit transaction status"
+      aria-live="polite"
+      className="rounded-md border bg-muted/30 p-3 text-sm"
+      role="status"
+    >
       <div className="grid gap-2 md:grid-cols-3">
         <Detail label="Tx hash" value={shortHash(hash)} />
         <Detail

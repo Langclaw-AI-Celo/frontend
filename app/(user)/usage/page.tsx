@@ -11,7 +11,7 @@ import {
   SendIcon,
   ShieldCheckIcon,
 } from "lucide-react";
-import { erc20Abi, formatUnits, parseUnits, type Address, type Hash } from "viem";
+import { erc20Abi, formatUnits, type Address, type Hash } from "viem";
 import {
   useBalance,
   usePublicClient,
@@ -73,6 +73,15 @@ import {
   productChainOptions,
   resolveProductChain,
 } from "@/lib/chains";
+import {
+  verifyCeloAttributionTransaction,
+  withCeloAttribution,
+} from "@/lib/celo-attribution";
+import {
+  parsePositiveBillingAmount,
+  validateDepositTransaction,
+  validateWithdrawalTransaction,
+} from "@/lib/credits-validation";
 import { isMiniPayProvider } from "@/lib/minipay";
 import { cn } from "@/lib/utils";
 
@@ -162,6 +171,7 @@ export default function UsagePage() {
   const [loading, setLoading] = useState("");
   const [copied, setCopied] = useState("");
   const autoCreditHashRef = useRef("");
+  const verifiedAttributionHashesRef = useRef(new Set<string>());
   const {
     data: depositReceipt,
     isLoading: isConfirmingDeposit,
@@ -355,6 +365,40 @@ export default function UsagePage() {
     return getWalletAuth({ chain: selectedChain });
   }, [address, getWalletAuth, selectedChain]);
 
+  const verifyConfirmedAttribution = useCallback(
+    async (hash: Hash) => {
+      if (
+        !publicClient ||
+        selectedChain !== "celo" ||
+        verifiedAttributionHashesRef.current.has(hash)
+      ) {
+        return;
+      }
+
+      verifiedAttributionHashesRef.current.add(hash);
+      const result = await verifyCeloAttributionTransaction({
+        chain: selectedChain,
+        getTransaction: (transactionHash) =>
+          publicClient.getTransaction({ hash: transactionHash }),
+        hash,
+      });
+
+      if (result.status === "verified" || result.status === "skipped") {
+        return;
+      }
+
+      const description =
+        result.status === "mismatch"
+          ? `Expected ${result.expectedCodes.join(", ")}; found ${result.codes.join(", ")}.`
+          : result.status === "missing"
+            ? "Confirmed calldata does not contain an ERC-8021 attribution tag."
+            : "The RPC could not read the confirmed transaction calldata.";
+
+      toast.warning("Celo attribution was not verified", { description });
+    },
+    [publicClient, selectedChain],
+  );
+
   const loadQuote = useCallback(async () => {
     try {
       const payload = await getUsageQuote(selectedChain);
@@ -424,6 +468,8 @@ export default function UsagePage() {
       return;
     }
 
+    void verifyConfirmedAttribution(withdrawHash);
+
     toast.success("Withdrawal completed", {
       description: `${shortHash(withdrawHash)} confirmed${
         withdrawReceipt?.blockNumber
@@ -444,6 +490,7 @@ export default function UsagePage() {
     refetchAuthorizedWithdrawal,
     refetchVaultPaused,
     refreshBalance,
+    verifyConfirmedAttribution,
     withdrawHash,
     withdrawReceipt?.blockNumber,
   ]);
@@ -536,6 +583,7 @@ export default function UsagePage() {
     }
 
     autoCreditHashRef.current = depositHash;
+    void verifyConfirmedAttribution(depositHash);
     const timeoutId = window.setTimeout(() => {
       void handleVerifyDeposit({
         hash: depositHash,
@@ -545,39 +593,32 @@ export default function UsagePage() {
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [depositHash, handleVerifyDeposit, isDepositConfirmed, reference]);
+  }, [
+    depositHash,
+    handleVerifyDeposit,
+    isDepositConfirmed,
+    reference,
+    verifyConfirmedAttribution,
+  ]);
 
   const handleSendDeposit = async () => {
-    if (!vaultInfo?.vaultAddress) {
-      showError(setError, "Load vault address first.");
+    const depositVaultAddress = vaultInfo?.vaultAddress;
+    const validationError = validateDepositTransaction({
+      amount: parsedDepositAmount,
+      billingSymbol,
+      hasInsufficientWalletBalance:
+        depositExceedsWalletBalance || hasNoBillingBalance,
+      reference: depositReference,
+      vaultAddress: depositVaultAddress,
+    });
+
+    if (validationError) {
+      showError(setError, validationError);
       return;
     }
 
-    if (!parsedDepositAmount) {
-      showError(
-        setError,
-        `Enter a valid ${billingSymbol} amount greater than zero.`
-      );
-      return;
-    }
-
-    if (depositExceedsWalletBalance || hasNoBillingBalance) {
-      showError(
-        setError,
-        `Insufficient ${billingSymbol} balance in your wallet for this deposit.`,
-      );
-      return;
-    }
-
-    if (!depositReference.trim()) {
-      showError(setError, "Deposit reference is required.");
-      return;
-    }
-
-    if (!isBytes32(depositReference)) {
-      showError(setError, "Deposit reference must be a bytes32 hex string.");
-      return;
-    }
+    const depositAmount = parsedDepositAmount!;
+    const validatedVaultAddress = depositVaultAddress!;
 
     setLoading("send-deposit");
     setError("");
@@ -601,14 +642,17 @@ export default function UsagePage() {
             return;
           }
 
-          const approvalHash = await writeApproveAsync({
+          const approvalRequest = withCeloAttribution(selectedChain, {
             abi: erc20Abi,
             address: billingTokenAddress,
-            args: [vaultInfo.vaultAddress as Address, parsedDepositAmount],
+            args: [validatedVaultAddress as Address, depositAmount],
             chainId: chainConfig.chainId,
             functionName: "approve",
             ...celoFeeRequest,
-          } as unknown as Parameters<typeof writeApproveAsync>[0]);
+          });
+          const approvalHash = await writeApproveAsync(
+            approvalRequest as unknown as Parameters<typeof writeApproveAsync>[0],
+          );
 
           toast.success(`${billingSymbol} approval sent`, {
             description: `${shortHash(approvalHash)} is waiting for confirmation.`,
@@ -619,24 +663,38 @@ export default function UsagePage() {
         }
       }
 
-      const hash = isTokenBilling
-        ? await writeDepositAsync({
-            abi: usageVaultAbi,
-            address: vaultInfo.vaultAddress as `0x${string}`,
-            args: [depositReference as `0x${string}`, parsedDepositAmount],
-            chainId: chainConfig.chainId,
-            functionName: "depositTokenAmount",
-            ...celoFeeRequest,
-          } as unknown as Parameters<typeof writeDepositAsync>[0])
-        : await writeDepositAsync({
-            abi: usageVaultAbi,
-            address: vaultInfo.vaultAddress as `0x${string}`,
-            args: [depositReference as `0x${string}`],
-            chainId: chainConfig.chainId,
-            functionName: "deposit",
-            value: parsedDepositAmount,
-            ...celoFeeRequest,
-          } as unknown as Parameters<typeof writeDepositAsync>[0]);
+      let hash: Hash;
+
+      if (isTokenBilling) {
+        const tokenDepositRequest = withCeloAttribution(selectedChain, {
+          abi: usageVaultAbi,
+          address: validatedVaultAddress as `0x${string}`,
+          args: [depositReference as `0x${string}`, depositAmount],
+          chainId: chainConfig.chainId,
+          functionName: "depositTokenAmount",
+          ...celoFeeRequest,
+        });
+        hash = await writeDepositAsync(
+          tokenDepositRequest as unknown as Parameters<
+            typeof writeDepositAsync
+          >[0],
+        );
+      } else {
+        const nativeDepositRequest = withCeloAttribution(selectedChain, {
+          abi: usageVaultAbi,
+          address: validatedVaultAddress as `0x${string}`,
+          args: [depositReference as `0x${string}`],
+          chainId: chainConfig.chainId,
+          functionName: "deposit",
+          value: depositAmount,
+          ...celoFeeRequest,
+        });
+        hash = await writeDepositAsync(
+          nativeDepositRequest as unknown as Parameters<
+            typeof writeDepositAsync
+          >[0],
+        );
+      }
 
       setDepositHash(hash);
       setTxHash(hash);
@@ -709,42 +767,38 @@ export default function UsagePage() {
   };
 
   const handleWithdrawOnchain = async () => {
-    if (!vaultAddress) {
-      showError(setError, "Load vault address first.");
+    const validationError = validateWithdrawalTransaction({
+      amount: parsedWithdrawAmount,
+      isAuthorized: withdrawalAmountIsCovered,
+      isVaultPaused,
+      vaultAddress,
+    });
+
+    if (validationError) {
+      showError(setError, validationError);
       return;
     }
 
-    if (!parsedWithdrawAmount) {
-      showError(setError, "Enter a valid withdrawal amount greater than zero.");
-      return;
-    }
-
-    if (isVaultPaused) {
-      showError(setError, "Vault is paused.");
-      return;
-    }
-
-    if (!withdrawalAmountIsCovered) {
-      showError(
-        setError,
-        "Backend has not authorized enough withdrawal allowance yet.",
-      );
-      return;
-    }
+    const withdrawalAmount = parsedWithdrawAmount!;
 
     setLoading("onchain-withdraw");
     setError("");
 
     try {
       await switchChainAsync?.({ chainId: chainConfig.chainId });
-      const hash = await writeWithdrawAsync({
+      const withdrawalRequest = withCeloAttribution(selectedChain, {
         abi: usageVaultAbi,
         address: vaultAddress,
-        args: [parsedWithdrawAmount],
+        args: [withdrawalAmount],
         chainId: chainConfig.chainId,
         functionName: "withdraw",
         ...(feeCurrencyAddress ? { feeCurrency: feeCurrencyAddress } : {}),
-      } as unknown as Parameters<typeof writeWithdrawAsync>[0]);
+      });
+      const hash = await writeWithdrawAsync(
+        withdrawalRequest as unknown as Parameters<
+          typeof writeWithdrawAsync
+        >[0],
+      );
 
       setWithdrawHash(hash);
       toast.success("Withdrawal transaction sent", {
@@ -985,12 +1039,14 @@ export default function UsagePage() {
           <CardContent className="flex flex-col gap-4">
             <div className="grid gap-3 lg:grid-cols-[0.75fr_1.25fr]">
               <div className="flex flex-col gap-2">
-                <label className="text-sm">
+                <label className="text-sm" htmlFor="deposit-amount">
                   <span className="mb-1 block text-muted-foreground">
                     Amount
                   </span>
                   <Input
+                    id="deposit-amount"
                     inputMode="decimal"
+                    name="depositAmount"
                     onChange={(event) =>
                       setDepositAmount(event.currentTarget.value)
                     }
@@ -1093,16 +1149,36 @@ export default function UsagePage() {
             </CardAction>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            <Input
-              onChange={(event) => setTxHash(event.currentTarget.value)}
-              placeholder="0x transaction hash"
-              value={txHash}
-            />
-            <Input
-              onChange={(event) => setReference(event.currentTarget.value)}
-              placeholder="reference (optional for receive deposits)"
-              value={reference}
-            />
+            <div className="flex flex-col gap-1">
+              <label
+                className="text-muted-foreground text-sm"
+                htmlFor="existing-deposit-hash"
+              >
+                Transaction hash
+              </label>
+              <Input
+                id="existing-deposit-hash"
+                name="existingDepositHash"
+                onChange={(event) => setTxHash(event.currentTarget.value)}
+                placeholder="0x transaction hash"
+                value={txHash}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label
+                className="text-muted-foreground text-sm"
+                htmlFor="existing-deposit-reference"
+              >
+                Reference
+              </label>
+              <Input
+                id="existing-deposit-reference"
+                name="existingDepositReference"
+                onChange={(event) => setReference(event.currentTarget.value)}
+                placeholder="reference (optional for receive deposits)"
+                value={reference}
+              />
+            </div>
             <p className="text-muted-foreground text-xs">
               Use this for deposits sent outside the app. If you used a
               reference, paste the same value.
@@ -1151,12 +1227,14 @@ export default function UsagePage() {
             </CardAction>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
-            <label className="text-sm">
+            <label className="text-sm" htmlFor="withdraw-amount">
               <span className="mb-1 block text-muted-foreground">
                 Amount to withdraw
               </span>
               <Input
+                id="withdraw-amount"
                 inputMode="decimal"
+                name="withdrawAmount"
                 onChange={(event) =>
                   setWithdrawAmount(event.currentTarget.value)
                 }
@@ -1222,7 +1300,13 @@ export default function UsagePage() {
               label="Withdrawal authority"
               value={String(withdrawalAuthorityData ?? "")}
             />
-            <div className="flex flex-wrap items-center gap-2">
+            <div
+              aria-atomic="true"
+              aria-label="Withdrawal transaction status"
+              aria-live="polite"
+              className="flex flex-wrap items-center gap-2"
+              role="status"
+            >
               <StatusBadge
                 label={
                   isLoadingVaultPaused
@@ -1400,7 +1484,13 @@ function DepositStatus({
   }
 
   return (
-    <div className="rounded-md border bg-muted/30 p-3 text-sm">
+    <div
+      aria-atomic="true"
+      aria-label="Deposit transaction status"
+      aria-live="polite"
+      className="rounded-md border bg-muted/30 p-3 text-sm"
+      role="status"
+    >
       <div className="grid gap-2 md:grid-cols-3">
         <Detail label="Tx hash" value={shortHash(hash)} />
         <Detail
@@ -1457,26 +1547,6 @@ function createBytes32Reference() {
   }
 
   return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-}
-
-function isBytes32(value: string) {
-  return /^0x[a-fA-F0-9]{64}$/.test(value);
-}
-
-function parsePositiveBillingAmount(value: string, decimals: number) {
-  const trimmed = value.trim();
-
-  if (!trimmed) {
-    return null;
-  }
-
-  try {
-    const parsed = parseUnits(trimmed, decimals);
-
-    return parsed > BigInt(0) ? parsed : null;
-  } catch {
-    return null;
-  }
 }
 
 function formatBillingUnits(value: bigint, decimals: number) {

@@ -2275,9 +2275,12 @@ function buildMemoryStats(memories: MemoryItem[]): MemoryStats {
 }
 
 export function readFriendlyError(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : fallback;
+  const messages = readErrorMessages(error);
+  const message = messages[0] || fallback;
+  const searchableMessage = messages.join("\n") || fallback;
+  const providerCode = readProviderErrorCode(error);
   const status = error instanceof LangclawApiError ? error.status : 0;
-  const insufficientBalanceSymbol = readInsufficientBalanceSymbol(message);
+  const insufficientBalanceSymbol = readInsufficientBalanceSymbol(searchableMessage);
 
   if (insufficientBalanceSymbol) {
     return `Insufficient ${insufficientBalanceSymbol} balance. Add ${insufficientBalanceSymbol} credits before running this request.`;
@@ -2295,27 +2298,174 @@ export function readFriendlyError(error: unknown, fallback: string) {
     return "Connect Telegram to continue.";
   }
 
-  if (/minipay session required/i.test(message)) {
+  if (/minipay session required/i.test(searchableMessage)) {
     return "MiniPay session required. Open the Credits page, add or verify a USDT deposit, then continue without a wallet signature.";
   }
 
-  if (/minipay does not use wallet signature prompts/i.test(message)) {
+  if (/minipay does not use wallet signature prompts/i.test(searchableMessage)) {
     return "This MiniPay action needs a fresh wallet signature. Use a browser wallet outside MiniPay for signature-only actions.";
   }
 
-  if (/wallet signature or api key is required/i.test(message)) {
+  if (/wallet signature or api key is required/i.test(searchableMessage)) {
     return "Connect and approve your wallet to continue.";
   }
 
-  if (/wallet signature is required/i.test(message)) {
+  if (/wallet signature is required/i.test(searchableMessage)) {
     return "Approve the wallet prompt to continue.";
   }
 
-  if (/supabase/i.test(message)) {
+  if (
+    providerCode === 4001 ||
+    providerCode === "ACTION_REJECTED" ||
+    /(?:user )?(?:rejected|denied)(?: the)? (?:request|transaction|signature)|request rejected/i.test(
+      searchableMessage,
+    )
+  ) {
+    return "You rejected the wallet request.";
+  }
+
+  if (
+    /wallet session (?:has )?(?:expired|invalid|revoked)|invalid_wallet_session|session token (?:expired|invalid)/i.test(
+      searchableMessage,
+    )
+  ) {
+    return "Your wallet session expired. Reconnect and approve your wallet.";
+  }
+
+  if (
+    /connector (?:not connected|unavailable)|wallet (?:is )?(?:not connected|disconnected)|no connector|provider disconnected/i.test(
+      searchableMessage,
+    )
+  ) {
+    return "Reconnect your wallet and try again.";
+  }
+
+  if (
+    /chain (?:is )?not (?:configured|supported)|switchchain|switch chain|unrecognized chain|wallet_(?:add|switch)ethereumchain|unsupported chain|wrong network/i.test(
+      searchableMessage,
+    )
+  ) {
+    return "Switch your wallet to the selected network and try again.";
+  }
+
+  if (
+    /insufficient funds(?: for (?:gas|intrinsic transaction cost))?|funds for gas|exceeds the balance of the account/i.test(
+      searchableMessage,
+    )
+  ) {
+    return "Your wallet does not have enough funds for this transaction and network fee.";
+  }
+
+  if (
+    /transaction (?:was )?replaced|replacement transaction|transaction .*cancelled|transaction .*canceled/i.test(
+      searchableMessage,
+    )
+  ) {
+    return "The transaction was replaced or cancelled in your wallet. Check its latest status.";
+  }
+
+  if (
+    /execution reverted|contract function .*revert|transaction .*revert|revert reason/i.test(
+      searchableMessage,
+    )
+  ) {
+    return "The transaction reverted. Check the amount, allowance, and contract state.";
+  }
+
+  if (
+    /nonce (?:too low|too high|has already been used)|already known|replacement transaction underpriced|transaction underpriced/i.test(
+      searchableMessage,
+    )
+  ) {
+    return "Your wallet transaction state is out of date. Refresh and try again.";
+  }
+
+  if (
+    /estimate gas|gas estimation|intrinsic gas|fee cap|base fee|max fee per gas|gas required exceeds allowance/i.test(
+      searchableMessage,
+    )
+  ) {
+    return "The network could not estimate or cover the transaction fee. Refresh and try again.";
+  }
+
+  if (
+    /rpc (?:request )?failed|failed to fetch|fetch failed|network (?:request |connection )?(?:failed|error)|timeout|timed out|http request failed|connection refused|socket hang up/i.test(
+      searchableMessage,
+    )
+  ) {
+    return "The wallet network is unavailable. Check your connection and try again.";
+  }
+
+  if (/supabase/i.test(searchableMessage)) {
     return "Account storage is not ready yet. Check backend configuration.";
   }
 
   return message || fallback;
+}
+
+function readErrorMessages(error: unknown) {
+  const messages: string[] = [];
+  collectErrorMessages(error, messages, new Set<object>());
+  return [...new Set(messages)];
+}
+
+function collectErrorMessages(
+  error: unknown,
+  messages: string[],
+  seen: Set<object>,
+) {
+  if (typeof error === "string") {
+    const message = error.trim();
+
+    if (message) {
+      messages.push(message);
+    }
+    return;
+  }
+
+  if (!error || typeof error !== "object" || seen.has(error)) {
+    return;
+  }
+
+  seen.add(error);
+  const record = error as {
+    cause?: unknown;
+    details?: unknown;
+    message?: unknown;
+    reason?: unknown;
+    shortMessage?: unknown;
+  };
+
+  for (const candidate of [
+    record.shortMessage,
+    record.message,
+    record.reason,
+    record.details,
+  ]) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      messages.push(candidate.trim());
+    }
+  }
+
+  collectErrorMessages(record.cause, messages, seen);
+}
+
+function readProviderErrorCode(error: unknown): number | string | undefined {
+  const seen = new Set<object>();
+  let current = error;
+
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const record = current as { cause?: unknown; code?: unknown };
+
+    if (typeof record.code === "number" || typeof record.code === "string") {
+      return record.code;
+    }
+
+    current = record.cause;
+  }
+
+  return undefined;
 }
 
 function readInsufficientBalanceSymbol(message: string) {

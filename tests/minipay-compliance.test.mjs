@@ -8,6 +8,7 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendRoot = path.resolve(testDir, "..");
 const walletSessionPath = path.join(frontendRoot, "hooks/use-wallet-session.ts");
 const langclawApiPath = path.join(frontendRoot, "lib/langclaw-api.ts");
+const miniPayPath = path.join(frontendRoot, "lib/minipay.ts");
 const web3ProviderPath = path.join(frontendRoot, "lib/Web3Provider.tsx");
 const envExamplePath = path.join(frontendRoot, ".env.example");
 const appSidebarPath = path.join(frontendRoot, "components/app-sidebar.tsx");
@@ -114,5 +115,36 @@ test("MiniPay sidebar hides the manual Connect Wallet button", () => {
   assert.ok(
     connectButtonIndex > miniPayBranchIndex,
     "Expected the manual Connect Wallet button to be outside the MiniPay branch.",
+  );
+});
+
+test("MiniPay provider detection guards server and non-MiniPay environments", () => {
+  const source = readFileSync(miniPayPath, "utf8");
+
+  assert.match(source, /typeof window !== "undefined"/);
+  assert.match(source, /window\.ethereum !== undefined/);
+  assert.match(source, /window\.ethereum\.isMiniPay === true/);
+  assert.match(
+    source,
+    /if \(!isMiniPayProvider\(\) \|\| !window\.ethereum\) {[\s\S]*?throw new Error\("Open this app inside MiniPay\."\)/,
+  );
+});
+
+test("MiniPay connector is stable and keeps shim disconnect disabled", () => {
+  const source = readFileSync(miniPayPath, "utf8");
+  const walletSessionSource = readFileSync(walletSessionPath, "utf8");
+
+  assert.equal(
+    source.match(/injected\(\{ shimDisconnect: false \}\)/g)?.length,
+    1,
+  );
+  assert.match(source, /const miniPayConnector = injected/);
+  assert.match(
+    source,
+    /export function getMiniPayConnector\(\) {[\s\S]*?return miniPayConnector;/,
+  );
+  assert.match(
+    walletSessionSource,
+    /if \(isMiniPayProvider\(\)\) {[\s\S]*?connectors\.find[\s\S]*?getMiniPayConnector\(\)[\s\S]*?chainId: MINIPAY_CHAIN_ID/,
   );
 });

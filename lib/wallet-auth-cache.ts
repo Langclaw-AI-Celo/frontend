@@ -17,7 +17,10 @@ export function parseCachedWalletAuth(
     if (
       typeof parsed.address !== "string" ||
       typeof parsed.sessionExpiresAt !== "string" ||
-      typeof parsed.sessionToken !== "string"
+      typeof parsed.sessionToken !== "string" ||
+      !isEvmAddress(parsed.address) ||
+      !isEvmAddress(address) ||
+      !isUsableSessionToken(parsed.sessionToken)
     ) {
       return null;
     }
@@ -39,4 +42,12 @@ export function parseCachedWalletAuth(
   } catch {
     return null;
   }
+}
+
+function isEvmAddress(value: string) {
+  return /^0x[a-fA-F0-9]{40}$/.test(value);
+}
+
+function isUsableSessionToken(value: string) {
+  return value.length > 0 && !/\s/.test(value);
 }

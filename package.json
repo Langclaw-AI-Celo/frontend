@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "3.0.182",
+    "@celo/attribution-tags": "0.3.0",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@rainbow-me/rainbowkit": "^2.2.11",
     "@streamdown/cjk": "^1.0.3",

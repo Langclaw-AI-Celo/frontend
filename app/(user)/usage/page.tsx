@@ -632,15 +632,20 @@ export default function UsagePage() {
           >[0],
         );
       } else {
-        hash = await writeDepositAsync({
-            abi: usageVaultAbi,
-            address: validatedVaultAddress as `0x${string}`,
-            args: [depositReference as `0x${string}`],
-            chainId: chainConfig.chainId,
-            functionName: "deposit",
-            value: depositAmount,
-            ...celoFeeRequest,
-          } as unknown as Parameters<typeof writeDepositAsync>[0]);
+        const nativeDepositRequest = withCeloAttribution(selectedChain, {
+          abi: usageVaultAbi,
+          address: validatedVaultAddress as `0x${string}`,
+          args: [depositReference as `0x${string}`],
+          chainId: chainConfig.chainId,
+          functionName: "deposit",
+          value: depositAmount,
+          ...celoFeeRequest,
+        });
+        hash = await writeDepositAsync(
+          nativeDepositRequest as unknown as Parameters<
+            typeof writeDepositAsync
+          >[0],
+        );
       }
 
       setDepositHash(hash);

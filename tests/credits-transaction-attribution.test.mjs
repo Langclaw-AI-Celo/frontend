@@ -24,3 +24,12 @@ test("token deposit sends a Celo-attributed write request", () => {
     /const tokenDepositRequest = withCeloAttribution\([\s\S]*?functionName: "depositTokenAmount"[\s\S]*?writeDepositAsync\(\s*tokenDepositRequest/,
   );
 });
+
+test("native deposit sends a Celo-attributed write request", () => {
+  const source = readFileSync(usagePagePath, "utf8");
+
+  assert.match(
+    source,
+    /const nativeDepositRequest = withCeloAttribution\([\s\S]*?functionName: "deposit"[\s\S]*?writeDepositAsync\(\s*nativeDepositRequest/,
+  );
+});

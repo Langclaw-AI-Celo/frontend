@@ -43,3 +43,38 @@ test("cached wallet sessions reject malformed or mismatched records", () => {
     null,
   );
 });
+
+test("cached wallet sessions reject unusable tokens", () => {
+  const expiresAt = new Date(now + 120_000).toISOString();
+
+  for (const sessionToken of ["", "   ", "session token", "session-token\n"]) {
+    assert.equal(
+      parseCachedWalletAuth(
+        cachedSession(expiresAt, { sessionToken }),
+        address,
+        now,
+      ),
+      null,
+    );
+  }
+});
+
+test("cached wallet sessions require valid EVM addresses", () => {
+  const expiresAt = new Date(now + 120_000).toISOString();
+
+  for (const invalidAddress of [
+    "wallet-address",
+    "0x1234",
+    `0x${"g".repeat(40)}`,
+    ` ${address}`,
+  ]) {
+    assert.equal(
+      parseCachedWalletAuth(
+        cachedSession(expiresAt, { address: invalidAddress }),
+        invalidAddress,
+        now,
+      ),
+      null,
+    );
+  }
+});

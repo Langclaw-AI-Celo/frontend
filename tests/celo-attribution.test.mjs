@@ -6,6 +6,7 @@ import { fromDataSuffix } from "@celo/attribution-tags";
 import {
   buildCeloAttributionTag,
   DEFAULT_CELO_ATTRIBUTION_HOSTNAME,
+  withCeloAttribution,
 } from "../lib/celo-attribution.ts";
 
 test("builds the default Celo attribution tag from the production hostname", () => {
@@ -67,4 +68,20 @@ test("falls back to the production hostname when configuration is invalid", () =
   assert.equal(attribution.hostname, DEFAULT_CELO_ATTRIBUTION_HOSTNAME);
   assert.deepEqual(attribution.codes, ["celo_1a98738636db"]);
   assert.match(warnings[0] ?? "", /NEXT_PUBLIC_CELO_ATTRIBUTION_HOSTNAME/);
+});
+
+test("adds attribution only to Celo contract write requests", () => {
+  const request = {
+    address: "0x1111111111111111111111111111111111111111",
+  };
+
+  const celoRequest = withCeloAttribution("celo", request, { env: {} });
+  const mantleRequest = withCeloAttribution("mantle", request, { env: {} });
+
+  assert.equal(
+    celoRequest.dataSuffix,
+    "0x63656c6f5f316139383733383633366462110080218021802180218021802180218021",
+  );
+  assert.equal("dataSuffix" in mantleRequest, false);
+  assert.equal(mantleRequest, request);
 });

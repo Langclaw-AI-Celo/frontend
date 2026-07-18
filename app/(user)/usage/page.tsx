@@ -73,6 +73,7 @@ import {
   productChainOptions,
   resolveProductChain,
 } from "@/lib/chains";
+import { withCeloAttribution } from "@/lib/celo-attribution";
 import {
   parsePositiveBillingAmount,
   validateDepositTransaction,
@@ -593,14 +594,17 @@ export default function UsagePage() {
             return;
           }
 
-          const approvalHash = await writeApproveAsync({
+          const approvalRequest = withCeloAttribution(selectedChain, {
             abi: erc20Abi,
             address: billingTokenAddress,
             args: [validatedVaultAddress as Address, depositAmount],
             chainId: chainConfig.chainId,
             functionName: "approve",
             ...celoFeeRequest,
-          } as unknown as Parameters<typeof writeApproveAsync>[0]);
+          });
+          const approvalHash = await writeApproveAsync(
+            approvalRequest as unknown as Parameters<typeof writeApproveAsync>[0],
+          );
 
           toast.success(`${billingSymbol} approval sent`, {
             description: `${shortHash(approvalHash)} is waiting for confirmation.`,

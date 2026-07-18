@@ -62,6 +62,21 @@ export function buildCeloAttributionTag({
   };
 }
 
+export function withCeloAttribution<T extends Record<string, unknown>>(
+  chain: string,
+  request: T,
+  options: BuildCeloAttributionTagOptions = {},
+): T & { dataSuffix?: Hex } {
+  if (chain !== "celo") {
+    return request;
+  }
+
+  return {
+    ...request,
+    dataSuffix: buildCeloAttributionTag(options).dataSuffix,
+  };
+}
+
 function readPublicAttributionEnvironment(): AttributionEnvironment {
   return {
     NEXT_PUBLIC_CELO_ATTRIBUTION_CODE:

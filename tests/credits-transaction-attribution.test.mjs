@@ -42,3 +42,16 @@ test("withdrawal sends a Celo-attributed write request", () => {
     /const withdrawalRequest = withCeloAttribution\([\s\S]*?functionName: "withdraw"[\s\S]*?writeWithdrawAsync\(\s*withdrawalRequest/,
   );
 });
+
+test("verifies deposit and withdrawal attribution after confirmation", () => {
+  const source = readFileSync(usagePagePath, "utf8");
+
+  assert.match(
+    source,
+    /!isWithdrawConfirmed \|\| !withdrawHash[\s\S]*?verifyConfirmedAttribution\(withdrawHash\)/,
+  );
+  assert.match(
+    source,
+    /!depositHash \|\|[\s\S]*?!isDepositConfirmed[\s\S]*?verifyConfirmedAttribution\(depositHash\)/,
+  );
+});

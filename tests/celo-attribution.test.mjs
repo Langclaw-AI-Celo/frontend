@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { fromDataSuffix } from "@celo/attribution-tags";
+import { fromDataSuffix, toDataSuffix } from "@celo/attribution-tags";
 
 import {
   buildCeloAttributionTag,
   DEFAULT_CELO_ATTRIBUTION_HOSTNAME,
+  verifyCeloAttributionTransaction,
   withCeloAttribution,
 } from "../lib/celo-attribution.ts";
+
+const transactionHash = `0x${"1".repeat(64)}`;
 
 test("builds the default Celo attribution tag from the production hostname", () => {
   const attribution = buildCeloAttributionTag({ env: {} });
@@ -84,4 +87,69 @@ test("adds attribution only to Celo contract write requests", () => {
   );
   assert.equal("dataSuffix" in mantleRequest, false);
   assert.equal(mantleRequest, request);
+});
+
+test("verifies configured attribution codes in confirmed Celo calldata", async () => {
+  const expected = buildCeloAttributionTag({ env: {} });
+  const dataSuffix = toDataSuffix([...expected.codes, "minipay"]);
+  const result = await verifyCeloAttributionTransaction({
+    chain: "celo",
+    getTransaction: async () => ({
+      input: `0x12345678${dataSuffix.slice(2)}`,
+    }),
+    hash: transactionHash,
+    options: { env: {} },
+  });
+
+  assert.deepEqual(result, {
+    codes: [...expected.codes, "minipay"],
+    expectedCodes: expected.codes,
+    status: "verified",
+  });
+});
+
+test("reports missing and mismatched Celo attribution", async () => {
+  const missing = await verifyCeloAttributionTransaction({
+    chain: "celo",
+    getTransaction: async () => ({ input: "0x12345678" }),
+    hash: transactionHash,
+    options: { env: {} },
+  });
+  const mismatch = await verifyCeloAttributionTransaction({
+    chain: "celo",
+    getTransaction: async () => ({
+      input: `0x12345678${toDataSuffix("another_app").slice(2)}`,
+    }),
+    hash: transactionHash,
+    options: { env: {} },
+  });
+
+  assert.equal(missing.status, "missing");
+  assert.equal(mismatch.status, "mismatch");
+  assert.deepEqual(mismatch.codes, ["another_app"]);
+});
+
+test("skips non-Celo transactions and handles unavailable readers", async () => {
+  let readCount = 0;
+  const skipped = await verifyCeloAttributionTransaction({
+    chain: "mantle",
+    getTransaction: async () => {
+      readCount += 1;
+      return null;
+    },
+    hash: transactionHash,
+    options: { env: {} },
+  });
+  const unavailable = await verifyCeloAttributionTransaction({
+    chain: "celo",
+    getTransaction: async () => {
+      throw new Error("RPC unavailable");
+    },
+    hash: transactionHash,
+    options: { env: {} },
+  });
+
+  assert.equal(skipped.status, "skipped");
+  assert.equal(readCount, 0);
+  assert.equal(unavailable.status, "unavailable");
 });

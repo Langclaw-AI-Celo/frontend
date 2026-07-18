@@ -1,5 +1,9 @@
-import { codeFromHostname, toDataSuffix } from "@celo/attribution-tags";
-import type { Hex } from "viem";
+import {
+  codeFromHostname,
+  fromDataSuffix,
+  toDataSuffix,
+} from "@celo/attribution-tags";
+import type { Hash, Hex } from "viem";
 
 export const DEFAULT_CELO_ATTRIBUTION_HOSTNAME =
   "langclawcelo.vercel.app";
@@ -18,6 +22,21 @@ export type CeloAttributionTag = {
   codes: string[];
   dataSuffix: Hex;
   hostname: string;
+};
+
+export type CeloAttributionVerification = {
+  codes: string[];
+  expectedCodes: string[];
+  status: "verified" | "missing" | "mismatch" | "skipped" | "unavailable";
+};
+
+export type VerifyCeloAttributionTransactionOptions = {
+  chain: string;
+  getTransaction: (
+    hash: Hash,
+  ) => Promise<{ input?: string } | null | undefined>;
+  hash: Hash;
+  options?: BuildCeloAttributionTagOptions;
 };
 
 export function buildCeloAttributionTag({
@@ -77,6 +96,44 @@ export function withCeloAttribution<T extends Record<string, unknown>>(
   };
 }
 
+export async function verifyCeloAttributionTransaction({
+  chain,
+  getTransaction,
+  hash,
+  options = {},
+}: VerifyCeloAttributionTransactionOptions): Promise<CeloAttributionVerification> {
+  if (chain !== "celo") {
+    return { codes: [], expectedCodes: [], status: "skipped" };
+  }
+
+  const expectedCodes = buildCeloAttributionTag(options).codes;
+
+  try {
+    const transaction = await getTransaction(hash);
+    const input = transaction?.input;
+
+    if (!input?.startsWith("0x")) {
+      return { codes: [], expectedCodes, status: "missing" };
+    }
+
+    const decoded = fromDataSuffix(input as Hex);
+
+    if (!decoded) {
+      return { codes: [], expectedCodes, status: "missing" };
+    }
+
+    return {
+      codes: decoded.codes,
+      expectedCodes,
+      status: containsCodesInOrder(decoded.codes, expectedCodes)
+        ? "verified"
+        : "mismatch",
+    };
+  } catch {
+    return { codes: [], expectedCodes, status: "unavailable" };
+  }
+}
+
 function readPublicAttributionEnvironment(): AttributionEnvironment {
   return {
     NEXT_PUBLIC_CELO_ATTRIBUTION_CODE:
@@ -93,6 +150,18 @@ function isValidAttributionCode(code: string) {
   } catch {
     return false;
   }
+}
+
+function containsCodesInOrder(codes: string[], expectedCodes: string[]) {
+  let expectedIndex = 0;
+
+  for (const code of codes) {
+    if (code === expectedCodes[expectedIndex]) {
+      expectedIndex += 1;
+    }
+  }
+
+  return expectedIndex === expectedCodes.length;
 }
 
 function defaultWarning(message: string) {

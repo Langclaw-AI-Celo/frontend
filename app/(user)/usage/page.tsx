@@ -73,7 +73,10 @@ import {
   productChainOptions,
   resolveProductChain,
 } from "@/lib/chains";
-import { withCeloAttribution } from "@/lib/celo-attribution";
+import {
+  verifyCeloAttributionTransaction,
+  withCeloAttribution,
+} from "@/lib/celo-attribution";
 import {
   parsePositiveBillingAmount,
   validateDepositTransaction,
@@ -168,6 +171,7 @@ export default function UsagePage() {
   const [loading, setLoading] = useState("");
   const [copied, setCopied] = useState("");
   const autoCreditHashRef = useRef("");
+  const verifiedAttributionHashesRef = useRef(new Set<string>());
   const {
     data: depositReceipt,
     isLoading: isConfirmingDeposit,
@@ -361,6 +365,40 @@ export default function UsagePage() {
     return getWalletAuth({ chain: selectedChain });
   }, [address, getWalletAuth, selectedChain]);
 
+  const verifyConfirmedAttribution = useCallback(
+    async (hash: Hash) => {
+      if (
+        !publicClient ||
+        selectedChain !== "celo" ||
+        verifiedAttributionHashesRef.current.has(hash)
+      ) {
+        return;
+      }
+
+      verifiedAttributionHashesRef.current.add(hash);
+      const result = await verifyCeloAttributionTransaction({
+        chain: selectedChain,
+        getTransaction: (transactionHash) =>
+          publicClient.getTransaction({ hash: transactionHash }),
+        hash,
+      });
+
+      if (result.status === "verified" || result.status === "skipped") {
+        return;
+      }
+
+      const description =
+        result.status === "mismatch"
+          ? `Expected ${result.expectedCodes.join(", ")}; found ${result.codes.join(", ")}.`
+          : result.status === "missing"
+            ? "Confirmed calldata does not contain an ERC-8021 attribution tag."
+            : "The RPC could not read the confirmed transaction calldata.";
+
+      toast.warning("Celo attribution was not verified", { description });
+    },
+    [publicClient, selectedChain],
+  );
+
   const loadQuote = useCallback(async () => {
     try {
       const payload = await getUsageQuote(selectedChain);
@@ -430,6 +468,8 @@ export default function UsagePage() {
       return;
     }
 
+    void verifyConfirmedAttribution(withdrawHash);
+
     toast.success("Withdrawal completed", {
       description: `${shortHash(withdrawHash)} confirmed${
         withdrawReceipt?.blockNumber
@@ -450,6 +490,7 @@ export default function UsagePage() {
     refetchAuthorizedWithdrawal,
     refetchVaultPaused,
     refreshBalance,
+    verifyConfirmedAttribution,
     withdrawHash,
     withdrawReceipt?.blockNumber,
   ]);
@@ -542,6 +583,7 @@ export default function UsagePage() {
     }
 
     autoCreditHashRef.current = depositHash;
+    void verifyConfirmedAttribution(depositHash);
     const timeoutId = window.setTimeout(() => {
       void handleVerifyDeposit({
         hash: depositHash,
@@ -551,7 +593,13 @@ export default function UsagePage() {
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [depositHash, handleVerifyDeposit, isDepositConfirmed, reference]);
+  }, [
+    depositHash,
+    handleVerifyDeposit,
+    isDepositConfirmed,
+    reference,
+    verifyConfirmedAttribution,
+  ]);
 
   const handleSendDeposit = async () => {
     const depositVaultAddress = vaultInfo?.vaultAddress;

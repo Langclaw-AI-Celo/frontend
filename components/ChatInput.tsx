@@ -237,12 +237,18 @@ const ChatInput = () => {
         });
         const session = createChatSession(text);
 
-        savePendingPrompt(session.id, {
+        const promptStored = savePendingPrompt(session.id, {
           model: resolveChatModel(),
           researchTrend: toolMode === "research",
           text,
           toolMode,
         });
+
+        if (!promptStored) {
+          throw new Error(
+            "Unable to prepare this chat. Check browser session storage and try again.",
+          );
+        }
 
         await upsertChatSession(wallet, session);
         dispatchChatSessionsUpdated();

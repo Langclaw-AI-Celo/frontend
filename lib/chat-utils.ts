@@ -51,6 +51,9 @@ export type PendingPrompt = {
 };
 
 const PENDING_PROMPT_STORAGE_PREFIX = "langclaw.pendingPrompt.v1";
+const MAX_PENDING_PROMPT_MODEL_LENGTH = 100;
+const MAX_PENDING_PROMPT_SESSION_ID_LENGTH = 256;
+const MAX_PENDING_PROMPT_TEXT_LENGTH = 20_000;
 
 export function createChatSession(
   message: string,
@@ -279,63 +282,129 @@ export function appendProgressSummary(events: WorkflowProgressEvent[]) {
 }
 
 export function savePendingPrompt(sessionId: string, prompt: PendingPrompt) {
-  if (typeof window === "undefined") {
-    return;
+  if (typeof window === "undefined" || !isValidPendingPromptSessionId(sessionId)) {
+    return false;
   }
 
-  window.sessionStorage.setItem(
-    getPendingPromptStorageKey(sessionId),
-    JSON.stringify(prompt)
-  );
+  const normalizedPrompt = normalizePendingPrompt(prompt);
+
+  if (!normalizedPrompt) {
+    return false;
+  }
+
+  try {
+    window.sessionStorage.setItem(
+      getPendingPromptStorageKey(sessionId),
+      JSON.stringify(normalizedPrompt)
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function consumePendingPrompt(sessionId: string) {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || !isValidPendingPromptSessionId(sessionId)) {
     return null;
   }
 
   const key = getPendingPromptStorageKey(sessionId);
-  const raw = window.sessionStorage.getItem(key);
+  let raw: string | null;
+
+  try {
+    raw = window.sessionStorage.getItem(key);
+
+    if (raw) {
+      window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    return null;
+  }
 
   if (!raw) {
     return null;
   }
 
-  window.sessionStorage.removeItem(key);
+  return parsePendingPrompt(raw);
+}
 
+export function parsePendingPrompt(raw: string) {
   try {
-    const parsed = JSON.parse(raw) as Partial<PendingPrompt>;
-
-    if (typeof parsed.text !== "string") {
-      return null;
-    }
-
-    const toolMode =
-      parsed.toolMode === "chat" ||
-      parsed.toolMode === "onchain" ||
-      parsed.toolMode === "research"
-        ? parsed.toolMode
-        : parsed.researchTrend === true
-          ? "research"
-          : "chat";
-
-    return {
-      chain:
-        parsed.chain === "celo" || parsed.chain === "mantle"
-          ? parsed.chain
-          : undefined,
-      model: typeof parsed.model === "string" ? parsed.model : undefined,
-      researchTrend: toolMode === "research",
-      text: parsed.text,
-      toolMode,
-    };
+    return normalizePendingPrompt(JSON.parse(raw));
   } catch {
     return null;
   }
 }
 
+function normalizePendingPrompt(value: unknown): PendingPrompt | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const parsed = value as Partial<PendingPrompt>;
+  const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
+
+  if (!text || text.length > MAX_PENDING_PROMPT_TEXT_LENGTH) {
+    return null;
+  }
+
+  if (
+    parsed.researchTrend !== undefined &&
+    typeof parsed.researchTrend !== "boolean"
+  ) {
+    return null;
+  }
+
+  if (
+    parsed.chain !== undefined &&
+    parsed.chain !== "celo" &&
+    parsed.chain !== "mantle"
+  ) {
+    return null;
+  }
+
+  const model = typeof parsed.model === "string" ? parsed.model.trim() : undefined;
+
+  if (
+    parsed.model !== undefined &&
+    (!model || model.length > MAX_PENDING_PROMPT_MODEL_LENGTH)
+  ) {
+    return null;
+  }
+
+  if (
+    parsed.toolMode !== undefined &&
+    parsed.toolMode !== "chat" &&
+    parsed.toolMode !== "onchain" &&
+    parsed.toolMode !== "research"
+  ) {
+    return null;
+  }
+
+  const toolMode =
+    parsed.toolMode ?? (parsed.researchTrend === true ? "research" : "chat");
+
+  return {
+    chain: parsed.chain,
+    model,
+    researchTrend: toolMode === "research",
+    text,
+    toolMode,
+  };
+}
+
 function getPendingPromptStorageKey(sessionId: string) {
   return `${PENDING_PROMPT_STORAGE_PREFIX}:${sessionId}`;
+}
+
+function isValidPendingPromptSessionId(sessionId: string) {
+  return (
+    typeof sessionId === "string" &&
+    sessionId.length > 0 &&
+    sessionId.length <= MAX_PENDING_PROMPT_SESSION_ID_LENGTH &&
+    sessionId === sessionId.trim() &&
+    !/[\u0000-\u001f\u007f]/.test(sessionId)
+  );
 }
 
 function createId() {

@@ -11,7 +11,7 @@ import {
   SendIcon,
   ShieldCheckIcon,
 } from "lucide-react";
-import { erc20Abi, formatUnits, parseUnits, type Address, type Hash } from "viem";
+import { erc20Abi, formatUnits, type Address, type Hash } from "viem";
 import {
   useBalance,
   usePublicClient,
@@ -73,6 +73,11 @@ import {
   productChainOptions,
   resolveProductChain,
 } from "@/lib/chains";
+import {
+  parsePositiveBillingAmount,
+  validateDepositTransaction,
+  validateWithdrawalTransaction,
+} from "@/lib/credits-validation";
 import { isMiniPayProvider } from "@/lib/minipay";
 import { cn } from "@/lib/utils";
 
@@ -548,36 +553,23 @@ export default function UsagePage() {
   }, [depositHash, handleVerifyDeposit, isDepositConfirmed, reference]);
 
   const handleSendDeposit = async () => {
-    if (!vaultInfo?.vaultAddress) {
-      showError(setError, "Load vault address first.");
+    const depositVaultAddress = vaultInfo?.vaultAddress;
+    const validationError = validateDepositTransaction({
+      amount: parsedDepositAmount,
+      billingSymbol,
+      hasInsufficientWalletBalance:
+        depositExceedsWalletBalance || hasNoBillingBalance,
+      reference: depositReference,
+      vaultAddress: depositVaultAddress,
+    });
+
+    if (validationError) {
+      showError(setError, validationError);
       return;
     }
 
-    if (!parsedDepositAmount) {
-      showError(
-        setError,
-        `Enter a valid ${billingSymbol} amount greater than zero.`
-      );
-      return;
-    }
-
-    if (depositExceedsWalletBalance || hasNoBillingBalance) {
-      showError(
-        setError,
-        `Insufficient ${billingSymbol} balance in your wallet for this deposit.`,
-      );
-      return;
-    }
-
-    if (!depositReference.trim()) {
-      showError(setError, "Deposit reference is required.");
-      return;
-    }
-
-    if (!isBytes32(depositReference)) {
-      showError(setError, "Deposit reference must be a bytes32 hex string.");
-      return;
-    }
+    const depositAmount = parsedDepositAmount!;
+    const validatedVaultAddress = depositVaultAddress!;
 
     setLoading("send-deposit");
     setError("");
@@ -604,7 +596,7 @@ export default function UsagePage() {
           const approvalHash = await writeApproveAsync({
             abi: erc20Abi,
             address: billingTokenAddress,
-            args: [vaultInfo.vaultAddress as Address, parsedDepositAmount],
+            args: [validatedVaultAddress as Address, depositAmount],
             chainId: chainConfig.chainId,
             functionName: "approve",
             ...celoFeeRequest,
@@ -622,19 +614,19 @@ export default function UsagePage() {
       const hash = isTokenBilling
         ? await writeDepositAsync({
             abi: usageVaultAbi,
-            address: vaultInfo.vaultAddress as `0x${string}`,
-            args: [depositReference as `0x${string}`, parsedDepositAmount],
+            address: validatedVaultAddress as `0x${string}`,
+            args: [depositReference as `0x${string}`, depositAmount],
             chainId: chainConfig.chainId,
             functionName: "depositTokenAmount",
             ...celoFeeRequest,
           } as unknown as Parameters<typeof writeDepositAsync>[0])
         : await writeDepositAsync({
             abi: usageVaultAbi,
-            address: vaultInfo.vaultAddress as `0x${string}`,
+            address: validatedVaultAddress as `0x${string}`,
             args: [depositReference as `0x${string}`],
             chainId: chainConfig.chainId,
             functionName: "deposit",
-            value: parsedDepositAmount,
+            value: depositAmount,
             ...celoFeeRequest,
           } as unknown as Parameters<typeof writeDepositAsync>[0]);
 
@@ -709,28 +701,19 @@ export default function UsagePage() {
   };
 
   const handleWithdrawOnchain = async () => {
-    if (!vaultAddress) {
-      showError(setError, "Load vault address first.");
+    const validationError = validateWithdrawalTransaction({
+      amount: parsedWithdrawAmount,
+      isAuthorized: withdrawalAmountIsCovered,
+      isVaultPaused,
+      vaultAddress,
+    });
+
+    if (validationError) {
+      showError(setError, validationError);
       return;
     }
 
-    if (!parsedWithdrawAmount) {
-      showError(setError, "Enter a valid withdrawal amount greater than zero.");
-      return;
-    }
-
-    if (isVaultPaused) {
-      showError(setError, "Vault is paused.");
-      return;
-    }
-
-    if (!withdrawalAmountIsCovered) {
-      showError(
-        setError,
-        "Backend has not authorized enough withdrawal allowance yet.",
-      );
-      return;
-    }
+    const withdrawalAmount = parsedWithdrawAmount!;
 
     setLoading("onchain-withdraw");
     setError("");
@@ -740,7 +723,7 @@ export default function UsagePage() {
       const hash = await writeWithdrawAsync({
         abi: usageVaultAbi,
         address: vaultAddress,
-        args: [parsedWithdrawAmount],
+        args: [withdrawalAmount],
         chainId: chainConfig.chainId,
         functionName: "withdraw",
         ...(feeCurrencyAddress ? { feeCurrency: feeCurrencyAddress } : {}),
@@ -1457,26 +1440,6 @@ function createBytes32Reference() {
   }
 
   return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-}
-
-function isBytes32(value: string) {
-  return /^0x[a-fA-F0-9]{64}$/.test(value);
-}
-
-function parsePositiveBillingAmount(value: string, decimals: number) {
-  const trimmed = value.trim();
-
-  if (!trimmed) {
-    return null;
-  }
-
-  try {
-    const parsed = parseUnits(trimmed, decimals);
-
-    return parsed > BigInt(0) ? parsed : null;
-  } catch {
-    return null;
-  }
 }
 
 function formatBillingUnits(value: bigint, decimals: number) {

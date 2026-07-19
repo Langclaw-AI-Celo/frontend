@@ -1449,6 +1449,7 @@ function isWalletChallenge(value: unknown): value is WalletChallenge {
     isNonEmptyResponseString(challenge.domain) &&
     Number.isFinite(issuedAt) &&
     Number.isFinite(expiresAt) &&
+    issuedAt <= Date.now() + 5 * 60 * 1000 &&
     expiresAt > issuedAt &&
     expiresAt > Date.now() &&
     isNonEmptyResponseString(challenge.message) &&
@@ -2029,10 +2030,21 @@ function isAutomationDashboard(value: unknown): value is AutomationDashboard {
   );
 }
 
+function isAutomationScheduleTime(value: unknown): value is string {
+  return (
+    typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
+  );
+}
+
 function isAutomationTask(value: unknown): value is AutomationTask {
   if (!isResponseObject(value)) {
     return false;
   }
+
+  const createdAt = value.createdAt;
+  const lastRunAt = value.lastRunAt;
+  const lastRunStatus = value.lastRunStatus;
+  const updatedAt = value.updatedAt;
 
   return (
     isNonEmptyResponseString(value.id) &&
@@ -2041,11 +2053,15 @@ function isAutomationTask(value: unknown): value is AutomationTask {
     isOptionalResponseString(value.prompt) &&
     isOptionalResponseString(value.model) &&
     ["schedule", "event", "webhook"].includes(String(value.triggerType)) &&
-    (value.scheduleFrequency === undefined ||
-      ["daily", "weekly", "monthly"].includes(
-        String(value.scheduleFrequency),
-      )) &&
-    isNonEmptyResponseString(value.scheduleTime) &&
+    (value.triggerType === "schedule"
+      ? ["daily", "weekly", "monthly"].includes(
+          String(value.scheduleFrequency),
+        )
+      : value.scheduleFrequency === undefined ||
+        ["daily", "weekly", "monthly"].includes(
+          String(value.scheduleFrequency),
+        )) &&
+    isAutomationScheduleTime(value.scheduleTime) &&
     (value.scheduleWeekday === undefined ||
       isBoundedResponseInteger(value.scheduleWeekday, 0, 6)) &&
     (value.scheduleMonthDay === undefined ||
@@ -2064,15 +2080,50 @@ function isAutomationTask(value: unknown): value is AutomationTask {
       String(value.displayStatus),
     ) &&
     isNonEmptyResponseString(value.triggerLabel) &&
-    isOptionalResponseTimestamp(value.lastRunAt) &&
-    (value.lastRunStatus === undefined ||
-      isAutomationRunStatus(value.lastRunStatus)) &&
+    isValidResponseTimestamp(createdAt) &&
+    isValidResponseTimestamp(updatedAt) &&
+    Date.parse(updatedAt) >= Date.parse(createdAt) &&
+    ((lastRunAt === undefined && lastRunStatus === undefined) ||
+      (isValidResponseTimestamp(lastRunAt) &&
+        isAutomationRunStatus(lastRunStatus) &&
+        Date.parse(lastRunAt) >= Date.parse(createdAt))) &&
     isOptionalResponseTimestamp(value.nextRunAt) &&
     isNonNegativeResponseInteger(value.consecutiveFailures) &&
     isNonNegativeResponseInteger(value.maxRetries) &&
-    isPositiveResponseInteger(value.failureThreshold) &&
-    isValidResponseTimestamp(value.createdAt) &&
-    isValidResponseTimestamp(value.updatedAt)
+    isPositiveResponseInteger(value.failureThreshold)
+  );
+}
+
+function hasValidAutomationRunLifecycle(value: Record<string, unknown>) {
+  if (value.status === "queued") {
+    return (
+      value.startedAt === undefined &&
+      value.completedAt === undefined &&
+      value.durationMs === undefined
+    );
+  }
+
+  if (value.status === "running") {
+    return (
+      isValidResponseTimestamp(value.startedAt) &&
+      value.completedAt === undefined &&
+      value.durationMs === undefined
+    );
+  }
+
+  if (value.status === "canceled") {
+    return (
+      isValidResponseTimestamp(value.completedAt) &&
+      ((value.startedAt === undefined && value.durationMs === undefined) ||
+        (isValidResponseTimestamp(value.startedAt) &&
+          isNonNegativeResponseInteger(value.durationMs)))
+    );
+  }
+
+  return (
+    isValidResponseTimestamp(value.startedAt) &&
+    isValidResponseTimestamp(value.completedAt) &&
+    isNonNegativeResponseInteger(value.durationMs)
   );
 }
 
@@ -2100,13 +2151,14 @@ function isAutomationRun(value: unknown): value is AutomationRun {
       value.completedAt,
       typeof startedAt === "string" ? startedAt : createdAt,
     ) &&
+    hasValidAutomationRunLifecycle(value) &&
     (value.durationMs === undefined ||
       isNonNegativeResponseInteger(value.durationMs)) &&
     isOptionalResponseString(value.error)
   );
 }
 
-function isAutomationRunStatus(value: unknown) {
+function isAutomationRunStatus(value: unknown): value is AutomationRunStatus {
   return [
     "queued",
     "running",
@@ -2160,10 +2212,18 @@ function isAutomationSettings(value: unknown): value is AutomationSettings {
     isOptionalResponseTimestamp(value.notificationEmailLinkedAt) &&
     isOptionalResponseString(value.notificationEmailPending) &&
     typeof value.notificationEmailVerified === "boolean" &&
+    (!value.notificationEmailVerified ||
+      (isNonEmptyResponseString(value.notificationEmail) &&
+        isValidResponseTimestamp(value.notificationEmailLinkedAt) &&
+        value.notificationChannels.includes("email"))) &&
     isOptionalResponseString(value.telegramChatId) &&
     isOptionalResponseTimestamp(value.telegramLinkedAt) &&
     isOptionalResponseString(value.telegramUsername) &&
     typeof value.telegramVerified === "boolean" &&
+    (!value.telegramVerified ||
+      (isNonEmptyResponseString(value.telegramChatId) &&
+        isValidResponseTimestamp(value.telegramLinkedAt) &&
+        value.notificationChannels.includes("telegram"))) &&
     typeof value.autoPauseRepeatedFailures === "boolean" &&
     typeof value.writeRunLogsToMemory === "boolean" &&
     isNonEmptyResponseString(value.dailyLimit0G) &&
@@ -2681,6 +2741,18 @@ function isUsageBalancePayload(value: unknown): value is UsageBalancePayload {
   );
 }
 
+function isNonNegativeIntegerResponseString(value: unknown): value is string {
+  return typeof value === "string" && /^\d+$/.test(value);
+}
+
+function isNonNegativeDecimalResponseString(value: unknown): value is string {
+  return typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value);
+}
+
+function isOptionalNonNegativeDecimalResponseString(value: unknown) {
+  return value === undefined || isNonNegativeDecimalResponseString(value);
+}
+
 function isUsageBalance(value: unknown): value is UsageBalance {
   if (!isResponseObject(value)) {
     return false;
@@ -2692,20 +2764,22 @@ function isUsageBalance(value: unknown): value is UsageBalance {
     isOptionalResponseString(value.nativeSymbol) &&
     [
       value.availableNeuron,
-      value.available0G,
       value.reservedNeuron,
-      value.reserved0G,
       value.lifetimeDepositedNeuron,
-      value.lifetimeDeposited0G,
       value.lifetimeChargedNeuron,
+    ].every(isNonNegativeIntegerResponseString) &&
+    [
+      value.available0G,
+      value.reserved0G,
+      value.lifetimeDeposited0G,
       value.lifetimeCharged0G,
-    ].every(isNonEmptyResponseString) &&
+    ].every(isNonNegativeDecimalResponseString) &&
     [
       value.availableNative,
       value.reservedNative,
       value.lifetimeDepositedNative,
       value.lifetimeChargedNative,
-    ].every(isOptionalResponseString)
+    ].every(isOptionalNonNegativeDecimalResponseString)
   );
 }
 
@@ -3019,11 +3093,14 @@ function isStrategyTrade(value: unknown) {
   }
 
   const trade = value as Record<string, unknown>;
+  const entryAt = trade.entryAt;
+  const exitAt = trade.exitAt;
 
   return (
-    isValidResponseTimestamp(trade.entryAt) &&
+    isValidResponseTimestamp(entryAt) &&
     isPositiveResponseNumber(trade.entryPriceUsd) &&
-    isValidResponseTimestamp(trade.exitAt) &&
+    isValidResponseTimestamp(exitAt) &&
+    Date.parse(exitAt) >= Date.parse(entryAt) &&
     isPositiveResponseNumber(trade.exitPriceUsd) &&
     isNonNegativeResponseNumber(trade.holdHours) &&
     isFiniteResponseNumber(trade.pnlBps) &&
@@ -3557,6 +3634,8 @@ function isMemoryItem(value: unknown): value is MemoryItem {
   }
 
   const memory = value as Record<string, unknown>;
+  const lastUsed = memory.lastUsed;
+  const updatedAt = memory.updatedAt;
 
   return (
     isNonEmptyResponseString(memory.id) &&
@@ -3567,8 +3646,9 @@ function isMemoryItem(value: unknown): value is MemoryItem {
     isNonEmptyResponseString(memory.scope) &&
     (memory.status === "active" || memory.status === "disabled") &&
     isNonEmptyResponseString(memory.source) &&
-    isValidResponseTimestamp(memory.lastUsed) &&
-    isValidResponseTimestamp(memory.updatedAt) &&
+    isValidResponseTimestamp(lastUsed) &&
+    isValidResponseTimestamp(updatedAt) &&
+    Date.parse(lastUsed) <= Date.parse(updatedAt) &&
     typeof memory.confidence === "number" &&
     Number.isFinite(memory.confidence) &&
     memory.confidence >= 0 &&

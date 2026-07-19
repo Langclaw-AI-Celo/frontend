@@ -286,6 +286,34 @@ test("wallet challenge responses reject expired challenges", async (t) => {
   );
 });
 
+test("wallet challenge responses reject far-future issuance", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const now = Date.now();
+  const challenge = walletChallengeRecord({
+    expiresAt: new Date(now + 65 * 60 * 1000).toISOString(),
+    issuedAt: new Date(now + 60 * 60 * 1000).toISOString(),
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ challenge, configured: true });
+
+  await assert.rejects(
+    requestWalletChallenge({
+      address: challenge.address,
+      chainId: challenge.chainId,
+      purpose: challenge.purpose,
+    }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid wallet challenge data." &&
+      error.status === 500,
+  );
+});
+
 test("wallet challenges must match the requested account and purpose", async (t) => {
   const originalFetch = globalThis.fetch;
   const challenge = walletChallengeRecord();
@@ -458,6 +486,90 @@ test("automation tasks require metadata for their trigger type", async (t) => {
   }
 });
 
+test("scheduled automation tasks require a frequency", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const task = automationTaskRecord({ scheduleFrequency: undefined });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json(automationDashboardRecord({ tasks: [task] }));
+
+  await assert.rejects(
+    getAutomationDashboard(walletSessionRecord()),
+    isInvalidAutomationError,
+  );
+});
+
+test("automation tasks reject malformed schedule times", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const scheduleTime of ["9:00", "24:00", "12:60"]) {
+    globalThis.fetch = async () =>
+      Response.json(
+        automationDashboardRecord({
+          tasks: [automationTaskRecord({ scheduleTime })],
+        }),
+      );
+
+    await assert.rejects(
+      getAutomationDashboard(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
+test("automation tasks reject reversed timestamps", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const task = automationTaskRecord({
+    createdAt: "2026-07-19T05:01:00.000Z",
+    updatedAt: "2026-07-19T05:00:00.000Z",
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json(automationDashboardRecord({ tasks: [task] }));
+
+  await assert.rejects(
+    getAutomationDashboard(walletSessionRecord()),
+    isInvalidAutomationError,
+  );
+});
+
+test("automation tasks require consistent last-run state", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const task of [
+    automationTaskRecord({ lastRunAt: "2026-07-19T05:01:00.000Z" }),
+    automationTaskRecord({ lastRunStatus: "completed" }),
+    automationTaskRecord({
+      lastRunAt: "2026-07-19T04:59:00.000Z",
+      lastRunStatus: "completed",
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json(automationDashboardRecord({ tasks: [task] }));
+
+    await assert.rejects(
+      getAutomationDashboard(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation task mutations reject malformed records and flags", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();
@@ -531,6 +643,48 @@ test("automation run responses reject malformed records and collections", async 
   }
 });
 
+test("automation runs require timestamps that match their lifecycle", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const run of [
+    automationRunRecord({
+      completedAt: undefined,
+      durationMs: 1000,
+      startedAt: "2026-07-19T05:00:01.000Z",
+    }),
+    automationRunRecord({
+      completedAt: undefined,
+      durationMs: undefined,
+      startedAt: undefined,
+      status: "running",
+    }),
+    automationRunRecord({
+      completedAt: "2026-07-19T05:00:02.000Z",
+      durationMs: 1000,
+      startedAt: "2026-07-19T05:00:01.000Z",
+      status: "running",
+    }),
+    automationRunRecord({
+      completedAt: undefined,
+      durationMs: undefined,
+      startedAt: "2026-07-19T05:00:01.000Z",
+      status: "queued",
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, runs: [run] });
+
+    await assert.rejects(
+      listAutomationRuns(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation run responses reject reversed timestamps", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();
@@ -588,6 +742,33 @@ test("automation settings endpoints reject malformed configuration data", async 
         error instanceof LangclawApiError &&
         error.message === "Backend returned invalid automation data." &&
         error.status === 500,
+    );
+  }
+});
+
+test("verified automation channels require linked destinations", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const settings of [
+    automationSettingsRecord({
+      notificationChannels: ["email", "in-app"],
+      notificationEmailVerified: true,
+    }),
+    automationSettingsRecord({
+      notificationChannels: ["telegram", "in-app"],
+      telegramVerified: true,
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, settings });
+
+    await assert.rejects(
+      getAutomationSettings(walletSessionRecord()),
+      isInvalidAutomationError,
     );
   }
 });
@@ -717,6 +898,33 @@ test("usage endpoints reject malformed balance and transaction data", async (t) 
 
     await assert.rejects(
       request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("usage balances reject malformed monetary values", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const balance of [
+    usageBalanceRecord({ availableNeuron: "-1" }),
+    usageBalanceRecord({ reservedNeuron: "1.5" }),
+    usageBalanceRecord({ lifetimeDeposited0G: "1e3" }),
+    usageBalanceRecord({ availableNative: "-0.1" }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, wallet: wallet.address, balance });
+
+    await assert.rejects(
+      getUsageBalance(wallet),
       (error) =>
         error instanceof LangclawApiError &&
         error.message === "Backend returned invalid usage data." &&
@@ -1050,6 +1258,31 @@ test("memory responses reject inconsistent statistics", async (t) => {
   }
 });
 
+test("memory responses reject last-used dates after their update", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      memories: [
+        memoryRecord({ lastUsed: "2026-07-20", updatedAt: "2026-07-19" }),
+      ],
+      settings: memorySettings(),
+    });
+
+  await assert.rejects(
+    getMemoryDashboard(walletSessionRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid memory data." &&
+      error.status === 500,
+  );
+});
+
 test("watchlist responses reject malformed items and mutation flags", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {
@@ -1167,6 +1400,39 @@ test("strategy backtests reject malformed response records", async (t) => {
   assert.deepEqual(
     await runStrategyBacktest({ chain: "celo", queryId: "123" }),
     valid,
+  );
+});
+
+test("strategy backtests reject trades that exit before entry", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord({
+    trades: [
+      {
+        entryAt: "2026-07-19T05:02:00.000Z",
+        entryPriceUsd: 1,
+        exitAt: "2026-07-19T05:01:00.000Z",
+        exitPriceUsd: 1.1,
+        holdHours: 0,
+        pnlBps: 1000,
+        pnlUsd: 100,
+        reason: "Take profit",
+      },
+    ],
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, backtest });
+
+  await assert.rejects(
+    runStrategyBacktest({ chain: "celo", queryId: "123" }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid strategy backtest data." &&
+      error.status === 500,
   );
 });
 
@@ -1572,8 +1838,11 @@ function automationTaskRecord(overrides = {}) {
 function automationRunRecord(overrides = {}) {
   return {
     attempt: 1,
+    completedAt: "2026-07-19T05:00:02.000Z",
     createdAt: "2026-07-19T05:00:00.000Z",
+    durationMs: 1000,
     id: "run-1",
+    startedAt: "2026-07-19T05:00:01.000Z",
     status: "completed",
     taskId: "task-1",
     taskName: "Daily Celo review",
@@ -1628,6 +1897,24 @@ function automationDashboardRecord(overrides = {}) {
       successRate: 100,
     },
     tasks: [automationTaskRecord()],
+    ...overrides,
+  };
+}
+
+function usageBalanceRecord(overrides = {}) {
+  return {
+    available0G: "1",
+    availableNative: "0.5",
+    availableNeuron: "1000000000",
+    lifetimeCharged0G: "0.1",
+    lifetimeChargedNative: "0.05",
+    lifetimeChargedNeuron: "100000000",
+    lifetimeDeposited0G: "2",
+    lifetimeDepositedNative: "1",
+    lifetimeDepositedNeuron: "2000000000",
+    reserved0G: "0.25",
+    reservedNative: "0.125",
+    reservedNeuron: "250000000",
     ...overrides,
   };
 }

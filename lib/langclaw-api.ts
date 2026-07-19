@@ -1381,8 +1381,16 @@ export function getLangclawApiUrl(path: string) {
 
 export async function checkBackendHealth() {
   const response = await getRequest("/health");
+  const payload = await readJsonResponse<{
+    ok: boolean;
+    service: string;
+  }>(response);
 
-  return readJsonResponse<{ ok: boolean; service: string }>(response);
+  if (payload.ok !== true || !isNonEmptyResponseString(payload.service)) {
+    throw new LangclawApiError("Backend returned invalid health data.", 500);
+  }
+
+  return payload;
 }
 
 export async function requestWalletChallenge(input: {

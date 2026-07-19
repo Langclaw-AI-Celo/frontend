@@ -68,6 +68,30 @@ test("successful responses reject non-object JSON bodies", async (t) => {
   }
 });
 
+test("backend health rejects malformed service status data", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { ok: "true", service: "langclaw-celo-backend" },
+    { ok: true, service: "" },
+    { ok: true },
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      checkBackendHealth(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid health data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("chat session responses reject malformed collections and records", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {

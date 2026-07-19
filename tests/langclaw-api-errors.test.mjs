@@ -643,6 +643,48 @@ test("automation run responses reject malformed records and collections", async 
   }
 });
 
+test("automation runs require timestamps that match their lifecycle", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const run of [
+    automationRunRecord({
+      completedAt: undefined,
+      durationMs: 1000,
+      startedAt: "2026-07-19T05:00:01.000Z",
+    }),
+    automationRunRecord({
+      completedAt: undefined,
+      durationMs: undefined,
+      startedAt: undefined,
+      status: "running",
+    }),
+    automationRunRecord({
+      completedAt: "2026-07-19T05:00:02.000Z",
+      durationMs: 1000,
+      startedAt: "2026-07-19T05:00:01.000Z",
+      status: "running",
+    }),
+    automationRunRecord({
+      completedAt: undefined,
+      durationMs: undefined,
+      startedAt: "2026-07-19T05:00:01.000Z",
+      status: "queued",
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, runs: [run] });
+
+    await assert.rejects(
+      listAutomationRuns(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation run responses reject reversed timestamps", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();
@@ -1684,8 +1726,11 @@ function automationTaskRecord(overrides = {}) {
 function automationRunRecord(overrides = {}) {
   return {
     attempt: 1,
+    completedAt: "2026-07-19T05:00:02.000Z",
     createdAt: "2026-07-19T05:00:00.000Z",
+    durationMs: 1000,
     id: "run-1",
+    startedAt: "2026-07-19T05:00:01.000Z",
     status: "completed",
     taskId: "task-1",
     taskName: "Daily Celo review",

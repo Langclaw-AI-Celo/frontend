@@ -2094,6 +2094,39 @@ function isAutomationTask(value: unknown): value is AutomationTask {
   );
 }
 
+function hasValidAutomationRunLifecycle(value: Record<string, unknown>) {
+  if (value.status === "queued") {
+    return (
+      value.startedAt === undefined &&
+      value.completedAt === undefined &&
+      value.durationMs === undefined
+    );
+  }
+
+  if (value.status === "running") {
+    return (
+      isValidResponseTimestamp(value.startedAt) &&
+      value.completedAt === undefined &&
+      value.durationMs === undefined
+    );
+  }
+
+  if (value.status === "canceled") {
+    return (
+      isValidResponseTimestamp(value.completedAt) &&
+      ((value.startedAt === undefined && value.durationMs === undefined) ||
+        (isValidResponseTimestamp(value.startedAt) &&
+          isNonNegativeResponseInteger(value.durationMs)))
+    );
+  }
+
+  return (
+    isValidResponseTimestamp(value.startedAt) &&
+    isValidResponseTimestamp(value.completedAt) &&
+    isNonNegativeResponseInteger(value.durationMs)
+  );
+}
+
 function isAutomationRun(value: unknown): value is AutomationRun {
   if (!isResponseObject(value)) {
     return false;
@@ -2118,6 +2151,7 @@ function isAutomationRun(value: unknown): value is AutomationRun {
       value.completedAt,
       typeof startedAt === "string" ? startedAt : createdAt,
     ) &&
+    hasValidAutomationRunLifecycle(value) &&
     (value.durationMs === undefined ||
       isNonNegativeResponseInteger(value.durationMs)) &&
     isOptionalResponseString(value.error)

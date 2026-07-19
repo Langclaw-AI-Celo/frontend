@@ -2227,6 +2227,8 @@ function isAutomationSettings(value: unknown): value is AutomationSettings {
     return false;
   }
 
+  const notificationChannels = value.notificationChannels;
+
   return (
     ["none", "3-attempts", "5-attempts"].includes(
       String(value.retryPolicy),
@@ -2234,10 +2236,11 @@ function isAutomationSettings(value: unknown): value is AutomationSettings {
     ["email", "in-app", "none"].includes(
       String(value.failureNotification),
     ) &&
-    Array.isArray(value.notificationChannels) &&
-    value.notificationChannels.every((channel) =>
+    Array.isArray(notificationChannels) &&
+    notificationChannels.every((channel) =>
       ["email", "telegram", "in-app"].includes(String(channel)),
     ) &&
+    new Set(notificationChannels).size === notificationChannels.length &&
     isOptionalResponseString(value.notificationEmail) &&
     isOptionalResponseTimestamp(value.notificationEmailLinkedAt) &&
     isOptionalResponseString(value.notificationEmailPending) &&
@@ -2245,7 +2248,7 @@ function isAutomationSettings(value: unknown): value is AutomationSettings {
     (!value.notificationEmailVerified ||
       (isNonEmptyResponseString(value.notificationEmail) &&
         isValidResponseTimestamp(value.notificationEmailLinkedAt) &&
-        value.notificationChannels.includes("email"))) &&
+        notificationChannels.includes("email"))) &&
     isOptionalResponseString(value.telegramChatId) &&
     isOptionalResponseTimestamp(value.telegramLinkedAt) &&
     isOptionalResponseString(value.telegramUsername) &&
@@ -2253,7 +2256,7 @@ function isAutomationSettings(value: unknown): value is AutomationSettings {
     (!value.telegramVerified ||
       (isNonEmptyResponseString(value.telegramChatId) &&
         isValidResponseTimestamp(value.telegramLinkedAt) &&
-        value.notificationChannels.includes("telegram"))) &&
+        notificationChannels.includes("telegram"))) &&
     typeof value.autoPauseRepeatedFailures === "boolean" &&
     typeof value.writeRunLogsToMemory === "boolean" &&
     isNonEmptyResponseString(value.dailyLimit0G) &&

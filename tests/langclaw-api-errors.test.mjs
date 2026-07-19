@@ -832,6 +832,25 @@ test("verified automation channels require linked destinations", async (t) => {
   }
 });
 
+test("automation settings reject duplicate notification channels", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const settings = automationSettingsRecord({
+    notificationChannels: ["in-app", "in-app"],
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, settings });
+
+  await assert.rejects(
+    getAutomationSettings(walletSessionRecord()),
+    isInvalidAutomationError,
+  );
+});
+
 test("automation notification endpoints reject malformed delivery data", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

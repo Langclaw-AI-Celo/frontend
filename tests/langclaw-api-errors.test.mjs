@@ -8,6 +8,7 @@ import {
   createAutomationTask,
   createAutomationTelegramLink,
   createWalletSession,
+  deleteChatSession,
   deleteAutomationTask,
   deleteAlphaWatchlistItem,
   deleteManyMemoryRecords,
@@ -52,6 +53,25 @@ import {
   verifyAutomationEmailLink,
   verifyUsageDeposit,
 } from "../lib/langclaw-api.ts";
+
+test("chat session deletion rejects malformed mutation flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, deleted: "false" });
+
+  await assert.rejects(
+    deleteChatSession(walletSessionRecord(), "session-1"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid chat session data." &&
+      error.status === 500,
+  );
+});
 
 test("successful responses reject invalid JSON bodies", async (t) => {
   const originalFetch = globalThis.fetch;

@@ -1695,7 +1695,11 @@ export async function deleteChatSession(wallet: WalletAuth, sessionId: string) {
     wallet,
   });
 
-  return Boolean(response.deleted);
+  if (typeof response.deleted !== "boolean") {
+    throw invalidChatSessionResponse();
+  }
+
+  return response.deleted;
 }
 
 export async function updateChatSessionMetadata(

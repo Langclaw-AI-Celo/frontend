@@ -1465,7 +1465,13 @@ export async function streamDiscover(input: DiscoverStreamInput) {
 
     if (chunk.type === "error") {
       input.onError?.(readErrorMessage(chunk.error));
+      return;
     }
+
+    throw new LangclawApiError(
+      "Backend returned an unsupported streaming event.",
+      response.status,
+    );
   });
 }
 
@@ -1556,7 +1562,13 @@ export async function streamChat(input: ChatStreamInput) {
 
     if (chunk.type === "error") {
       input.onError?.(readErrorMessage(chunk.error));
+      return;
     }
+
+    throw new LangclawApiError(
+      "Backend returned an unsupported streaming event.",
+      response.status,
+    );
   });
 }
 

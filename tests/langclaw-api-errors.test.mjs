@@ -5,6 +5,7 @@ import {
   checkBackendHealth,
   LangclawApiError,
   readFriendlyError,
+  streamChat,
   streamDiscover,
 } from "../lib/langclaw-api.ts";
 
@@ -120,6 +121,33 @@ test("streaming responses reject chunks without an event type", async (t) => {
       (error) =>
         error instanceof LangclawApiError &&
         error.message === "Backend returned an unexpected streaming response." &&
+        error.status === 200,
+    );
+  }
+});
+
+test("streams reject unsupported event types", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    new Response('{"type":"reslt","payload":{}}\n', {
+      headers: { "Content-Type": "application/x-ndjson" },
+      status: 200,
+    });
+
+  for (const request of [
+    () => streamDiscover({ topic: "CELO" }),
+    () => streamChat({ message: "Check CELO" }),
+  ]) {
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned an unsupported streaming event." &&
         error.status === 200,
     );
   }

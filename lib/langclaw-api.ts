@@ -3617,6 +3617,8 @@ function isMemoryItem(value: unknown): value is MemoryItem {
   }
 
   const memory = value as Record<string, unknown>;
+  const lastUsed = memory.lastUsed;
+  const updatedAt = memory.updatedAt;
 
   return (
     isNonEmptyResponseString(memory.id) &&
@@ -3627,8 +3629,9 @@ function isMemoryItem(value: unknown): value is MemoryItem {
     isNonEmptyResponseString(memory.scope) &&
     (memory.status === "active" || memory.status === "disabled") &&
     isNonEmptyResponseString(memory.source) &&
-    isValidResponseTimestamp(memory.lastUsed) &&
-    isValidResponseTimestamp(memory.updatedAt) &&
+    isValidResponseTimestamp(lastUsed) &&
+    isValidResponseTimestamp(updatedAt) &&
+    Date.parse(lastUsed) <= Date.parse(updatedAt) &&
     typeof memory.confidence === "number" &&
     Number.isFinite(memory.confidence) &&
     memory.confidence >= 0 &&

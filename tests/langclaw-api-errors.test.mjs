@@ -1231,6 +1231,31 @@ test("memory responses reject inconsistent statistics", async (t) => {
   }
 });
 
+test("memory responses reject last-used dates after their update", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      memories: [
+        memoryRecord({ lastUsed: "2026-07-20", updatedAt: "2026-07-19" }),
+      ],
+      settings: memorySettings(),
+    });
+
+  await assert.rejects(
+    getMemoryDashboard(walletSessionRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid memory data." &&
+      error.status === 500,
+  );
+});
+
 test("watchlist responses reject malformed items and mutation flags", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {

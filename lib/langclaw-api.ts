@@ -1702,7 +1702,7 @@ function isStoredChatMessage(value: unknown) {
   );
 }
 
-function isNonEmptyResponseString(value: unknown) {
+function isNonEmptyResponseString(value: unknown): value is string {
   return typeof value === "string" && Boolean(value.trim());
 }
 
@@ -1724,14 +1724,17 @@ function invalidChatSessionResponse() {
 export async function listApiKeys(wallet: WalletAuth) {
   const response = await apiKeysRequest({ action: "list", wallet });
 
-  return response.keys ?? [];
+  return requireApiKeys(response.keys);
 }
 
 export async function createApiKey(wallet: WalletAuth, name: string) {
   const response = await apiKeysRequest({ action: "create", name, wallet });
 
-  if (!response.key || !response.secret) {
-    throw new LangclawApiError("API key was not returned.", 500);
+  if (
+    !isApiKeyRecord(response.key) ||
+    !isNonEmptyResponseString(response.secret)
+  ) {
+    throw invalidApiKeyResponse();
   }
 
   return {
@@ -1744,11 +1747,51 @@ export async function createApiKey(wallet: WalletAuth, name: string) {
 export async function revokeApiKey(wallet: WalletAuth, keyId: string) {
   const response = await apiKeysRequest({ action: "revoke", keyId, wallet });
 
-  if (!response.key) {
-    throw new LangclawApiError("API key was not returned.", 500);
+  if (!isApiKeyRecord(response.key)) {
+    throw invalidApiKeyResponse();
   }
 
   return response.key;
+}
+
+function requireApiKeys(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isApiKeyRecord)) {
+    throw invalidApiKeyResponse();
+  }
+
+  return value as ApiKeyRecord[];
+}
+
+function isApiKeyRecord(value: unknown): value is ApiKeyRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const key = value as Record<string, unknown>;
+
+  return (
+    isNonEmptyResponseString(key.id) &&
+    isNonEmptyResponseString(key.name) &&
+    isNonEmptyResponseString(key.maskedKey) &&
+    isNonEmptyResponseString(key.status) &&
+    isValidResponseTimestamp(key.createdAt) &&
+    isOptionalResponseString(key.prefix) &&
+    isOptionalResponseString(key.suffix) &&
+    isOptionalResponseTimestamp(key.lastUsedAt) &&
+    isOptionalResponseTimestamp(key.revokedAt)
+  );
+}
+
+function isOptionalResponseString(value: unknown) {
+  return value === undefined || isNonEmptyResponseString(value);
+}
+
+function isOptionalResponseTimestamp(value: unknown) {
+  return value === undefined || isValidResponseTimestamp(value);
+}
+
+function invalidApiKeyResponse() {
+  return new LangclawApiError("Backend returned invalid API key data.", 500);
 }
 
 export async function getMemoryDashboard(wallet: WalletAuth) {

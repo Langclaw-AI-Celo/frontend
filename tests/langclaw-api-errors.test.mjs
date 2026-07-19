@@ -3,10 +3,13 @@ import test from "node:test";
 
 import {
   checkBackendHealth,
+  createApiKey,
   getChatSession,
   LangclawApiError,
+  listApiKeys,
   listChatSessions,
   readFriendlyError,
+  revokeApiKey,
   streamChat,
   streamDiscover,
 } from "../lib/langclaw-api.ts";
@@ -99,6 +102,50 @@ test("chat session responses reject malformed collections and records", async (t
       error.message === "Backend returned invalid chat session data." &&
       error.status === 500,
   );
+});
+
+test("API key responses reject malformed collections and records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionToken: "test-session",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const keys of [
+    "invalid",
+    [null],
+    [apiKeyRecord({ createdAt: "invalid" })],
+  ]) {
+    globalThis.fetch = async () => Response.json({ configured: true, keys });
+
+    await assert.rejects(
+      listApiKeys(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid API key data." &&
+        error.status === 500,
+    );
+  }
+
+  for (const request of [
+    () => createApiKey(wallet, "Research key"),
+    () => revokeApiKey(wallet, "key-1"),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, key: "invalid", secret: 123 });
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid API key data." &&
+        error.status === 500,
+    );
+  }
 });
 
 test("streaming responses reject malformed NDJSON chunks", async (t) => {
@@ -303,6 +350,17 @@ function chatSessionRecord(overrides = {}) {
     pinned: false,
     title: "CELO research",
     updatedAt: "2026-07-19T05:01:00.000Z",
+    ...overrides,
+  };
+}
+
+function apiKeyRecord(overrides = {}) {
+  return {
+    createdAt: "2026-07-19T05:00:00.000Z",
+    id: "key-1",
+    maskedKey: "lc_live_••••1234",
+    name: "Research key",
+    status: "active",
     ...overrides,
   };
 }

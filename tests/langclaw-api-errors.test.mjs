@@ -545,6 +545,31 @@ test("automation tasks reject reversed timestamps", async (t) => {
   );
 });
 
+test("automation tasks require consistent last-run state", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const task of [
+    automationTaskRecord({ lastRunAt: "2026-07-19T05:01:00.000Z" }),
+    automationTaskRecord({ lastRunStatus: "completed" }),
+    automationTaskRecord({
+      lastRunAt: "2026-07-19T04:59:00.000Z",
+      lastRunStatus: "completed",
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json(automationDashboardRecord({ tasks: [task] }));
+
+    await assert.rejects(
+      getAutomationDashboard(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation task mutations reject malformed records and flags", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

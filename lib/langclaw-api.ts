@@ -2042,6 +2042,8 @@ function isAutomationTask(value: unknown): value is AutomationTask {
   }
 
   const createdAt = value.createdAt;
+  const lastRunAt = value.lastRunAt;
+  const lastRunStatus = value.lastRunStatus;
   const updatedAt = value.updatedAt;
 
   return (
@@ -2078,16 +2080,17 @@ function isAutomationTask(value: unknown): value is AutomationTask {
       String(value.displayStatus),
     ) &&
     isNonEmptyResponseString(value.triggerLabel) &&
-    isOptionalResponseTimestamp(value.lastRunAt) &&
-    (value.lastRunStatus === undefined ||
-      isAutomationRunStatus(value.lastRunStatus)) &&
+    isValidResponseTimestamp(createdAt) &&
+    isValidResponseTimestamp(updatedAt) &&
+    Date.parse(updatedAt) >= Date.parse(createdAt) &&
+    ((lastRunAt === undefined && lastRunStatus === undefined) ||
+      (isValidResponseTimestamp(lastRunAt) &&
+        isAutomationRunStatus(lastRunStatus) &&
+        Date.parse(lastRunAt) >= Date.parse(createdAt))) &&
     isOptionalResponseTimestamp(value.nextRunAt) &&
     isNonNegativeResponseInteger(value.consecutiveFailures) &&
     isNonNegativeResponseInteger(value.maxRetries) &&
-    isPositiveResponseInteger(value.failureThreshold) &&
-    isValidResponseTimestamp(createdAt) &&
-    isValidResponseTimestamp(updatedAt) &&
-    Date.parse(updatedAt) >= Date.parse(createdAt)
+    isPositiveResponseInteger(value.failureThreshold)
   );
 }
 
@@ -2121,7 +2124,7 @@ function isAutomationRun(value: unknown): value is AutomationRun {
   );
 }
 
-function isAutomationRunStatus(value: unknown) {
+function isAutomationRunStatus(value: unknown): value is AutomationRunStatus {
   return [
     "queued",
     "running",

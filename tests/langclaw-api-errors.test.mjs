@@ -14,6 +14,7 @@ import {
   listApiKeys,
   listAlphaWatchlist,
   listChatSessions,
+  openStrategyPaperTrade,
   readFriendlyError,
   revokeApiKey,
   runStrategyBacktest,
@@ -341,6 +342,46 @@ test("strategy pair scans reject malformed response records", async (t) => {
   globalThis.fetch = async () => Response.json({ configured: true, scan: valid });
   assert.deepEqual(
     await scanStrategyPairs({ chain: "celo", queryId: "123" }),
+    valid,
+  );
+});
+
+test("strategy paper trades reject malformed response records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const valid = strategyPaperTradeRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const paperTrade of [
+    undefined,
+    "invalid",
+    { ...valid, action: "transfer" },
+    { ...valid, notionalUsd: "1000" },
+    { ...valid, proof: { status: "anchored" } },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, paperTrade });
+
+    await assert.rejects(
+      openStrategyPaperTrade({ backtest, chain: "celo", notionalUsd: 1_000 }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid strategy paper trade data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, paperTrade: valid });
+  assert.deepEqual(
+    await openStrategyPaperTrade({
+      backtest,
+      chain: "celo",
+      notionalUsd: 1_000,
+    }),
     valid,
   );
 });
@@ -693,6 +734,40 @@ function strategyScanRecord(overrides = {}) {
     scannedPairs: 1,
     selectedPairAddress: bestBacktest.pairAddress,
     sourceUrl: "https://api.dune.com/api/v1/query/123/results",
+    ...overrides,
+  };
+}
+
+function strategyPaperTradeRecord(overrides = {}) {
+  const pairAddress = "0xeAfc4D6d4c3391Cd4Fc10c85D2f5f972d58C0dD5";
+
+  return {
+    action: "hold",
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    confidence: 65,
+    generatedAt: "2026-07-19T05:02:00.000Z",
+    market: `celo:${pairAddress}`,
+    notionalUsd: 1_000,
+    pairAddress,
+    proof: {
+      action: "hold",
+      agentId: "133",
+      chain: "celo",
+      chainId: 42220,
+      chainName: "Celo",
+      decisionHash: `0x${"1".repeat(64)}`,
+      evidenceUri: "langclaw://strategy/paper-test",
+      pnlBps: 0,
+      resultHash: `0x${"2".repeat(64)}`,
+      status: "prepared",
+      strategyStatus: "paper-opened",
+    },
+    rationale: "Momentum remains below the entry threshold.",
+    referenceBacktestRunId: "bt-test",
+    runId: "paper-test",
+    strategyId: "celo-liquidity-momentum-v1",
     ...overrides,
   };
 }

@@ -2357,7 +2357,7 @@ function isStrategyTrade(value: unknown) {
   );
 }
 
-function isTradingJournalProof(value: unknown) {
+function isTradingJournalProof(value: unknown): value is TradingJournalProof {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
@@ -2494,7 +2494,53 @@ export async function openStrategyPaperTrade(input: {
   const response = await postJson("/api/strategy/paper-trade", input);
   const payload = await readJsonResponse<StrategyPaperTradeResponse>(response);
 
+  if (!isStrategyPaperTrade(payload.paperTrade)) {
+    throw new LangclawApiError(
+      "Backend returned invalid strategy paper trade data.",
+      500,
+    );
+  }
+
   return payload.paperTrade;
+}
+
+function isStrategyPaperTrade(
+  value: unknown,
+): value is StrategyPaperTradePayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const paperTrade = value as Record<string, unknown>;
+  const proof =
+    paperTrade.proof &&
+    typeof paperTrade.proof === "object" &&
+    !Array.isArray(paperTrade.proof)
+      ? (paperTrade.proof as Record<string, unknown>)
+      : undefined;
+
+  return (
+    ["buy", "sell", "hold", "exit"].includes(String(paperTrade.action)) &&
+    isOptionalProductChain(paperTrade.chain) &&
+    isOptionalPositiveResponseInteger(paperTrade.chainId) &&
+    isOptionalResponseString(paperTrade.chainName) &&
+    isBoundedResponseNumber(paperTrade.confidence, 0, 100) &&
+    isValidResponseTimestamp(paperTrade.generatedAt) &&
+    isNonEmptyResponseString(paperTrade.market) &&
+    isPositiveResponseNumber(paperTrade.notionalUsd) &&
+    isNonEmptyResponseString(paperTrade.pairAddress) &&
+    proof !== undefined &&
+    isTradingJournalProof(proof) &&
+    isNonEmptyResponseString(paperTrade.rationale) &&
+    isNonEmptyResponseString(paperTrade.referenceBacktestRunId) &&
+    isNonEmptyResponseString(paperTrade.runId) &&
+    isNonEmptyResponseString(paperTrade.strategyId) &&
+    proof?.action === paperTrade.action &&
+    (paperTrade.chain === undefined ||
+      proof.chain === undefined ||
+      proof.chain === paperTrade.chain) &&
+    (paperTrade.chainId === undefined || proof.chainId === paperTrade.chainId)
+  );
 }
 
 export async function listStrategyRuns(limit = 25, chain?: ProductChainId) {

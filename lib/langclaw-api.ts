@@ -2504,10 +2504,23 @@ async function postJson(path: string, body: unknown, signal?: AbortSignal) {
 }
 
 async function readJsonResponse<T>(response: Response) {
-  const payload = (await response.json().catch(() => null)) as {
+  let payload: {
     code?: unknown;
     error?: unknown;
   } | null;
+
+  try {
+    payload = (await response.json()) as typeof payload;
+  } catch {
+    if (response.ok) {
+      throw new LangclawApiError(
+        "Backend returned an invalid JSON response.",
+        response.status,
+      );
+    }
+
+    payload = null;
+  }
 
   if (!response.ok) {
     throw new LangclawApiError(

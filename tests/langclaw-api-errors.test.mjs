@@ -2,9 +2,32 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  checkBackendHealth,
   LangclawApiError,
   readFriendlyError,
 } from "../lib/langclaw-api.ts";
+
+test("successful responses reject invalid JSON bodies", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    new Response("not-json", {
+      headers: { "Content-Type": "application/json" },
+      status: 200,
+    });
+
+  await assert.rejects(
+    checkBackendHealth(),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned an invalid JSON response." &&
+      error.status === 200,
+  );
+});
 
 test("insufficient balance errors keep the currency reported by the backend", () => {
   for (const symbol of ["CELO", "MNT", "USDT"]) {

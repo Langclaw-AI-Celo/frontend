@@ -16,6 +16,9 @@ import {
   getChatSession,
   getMemoryDashboard,
   getMemorySettings,
+  getUsageBalance,
+  getUsageQuote,
+  getUsageVaultInfo,
   LangclawApiError,
   listApiKeys,
   listAlphaWatchlist,
@@ -28,6 +31,7 @@ import {
   readFriendlyError,
   requestWalletChallenge,
   requestAutomationEmailLink,
+  requestUsageWithdraw,
   revokeApiKey,
   runAutomationTask,
   runStrategyBacktest,
@@ -45,6 +49,7 @@ import {
   updateAutomationSettings,
   upsertAlphaWatchlistItem,
   verifyAutomationEmailLink,
+  verifyUsageDeposit,
 } from "../lib/langclaw-api.ts";
 
 test("successful responses reject invalid JSON bodies", async (t) => {
@@ -351,6 +356,38 @@ test("automation notification endpoints reject malformed delivery data", async (
     pollAutomationTelegramLink(wallet),
     isInvalidAutomationError,
   );
+});
+
+test("usage endpoints reject malformed balance and transaction data", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const cases = [
+    [() => getUsageBalance(wallet, "celo"), { configured: true, wallet: wallet.address, balance: "invalid" }],
+    [() => getUsageQuote("celo"), { configured: true, quote: { estimatedPromptTokens: "6000" } }],
+    [() => getUsageVaultInfo("celo"), { configured: true, vaultAddress: "invalid" }],
+    [
+      () => verifyUsageDeposit({ chain: "celo", txHash: `0x${"1".repeat(64)}`, wallet }),
+      { configured: true, credited: "true", wallet: wallet.address },
+    ],
+    [() => requestUsageWithdraw(wallet, "celo"), { configured: true, functionName: "transfer" }],
+  ];
+
+  for (const [request, payload] of cases) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
 });
 
 function isInvalidAutomationError(error) {

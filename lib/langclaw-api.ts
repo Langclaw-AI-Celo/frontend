@@ -3093,11 +3093,14 @@ function isStrategyTrade(value: unknown) {
   }
 
   const trade = value as Record<string, unknown>;
+  const entryAt = trade.entryAt;
+  const exitAt = trade.exitAt;
 
   return (
-    isValidResponseTimestamp(trade.entryAt) &&
+    isValidResponseTimestamp(entryAt) &&
     isPositiveResponseNumber(trade.entryPriceUsd) &&
-    isValidResponseTimestamp(trade.exitAt) &&
+    isValidResponseTimestamp(exitAt) &&
+    Date.parse(exitAt) >= Date.parse(entryAt) &&
     isPositiveResponseNumber(trade.exitPriceUsd) &&
     isNonNegativeResponseNumber(trade.holdHours) &&
     isFiniteResponseNumber(trade.pnlBps) &&

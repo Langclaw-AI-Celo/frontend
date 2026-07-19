@@ -1403,6 +1403,39 @@ test("strategy backtests reject malformed response records", async (t) => {
   );
 });
 
+test("strategy backtests reject trades that exit before entry", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord({
+    trades: [
+      {
+        entryAt: "2026-07-19T05:02:00.000Z",
+        entryPriceUsd: 1,
+        exitAt: "2026-07-19T05:01:00.000Z",
+        exitPriceUsd: 1.1,
+        holdHours: 0,
+        pnlBps: 1000,
+        pnlUsd: 100,
+        reason: "Take profit",
+      },
+    ],
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, backtest });
+
+  await assert.rejects(
+    runStrategyBacktest({ chain: "celo", queryId: "123" }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid strategy backtest data." &&
+      error.status === 500,
+  );
+});
+
 test("strategy pair scans reject malformed response records", async (t) => {
   const originalFetch = globalThis.fetch;
   const valid = strategyScanRecord();

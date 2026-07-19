@@ -2591,14 +2591,25 @@ async function readNdjson<TChunk>(
 }
 
 function parseNdjsonChunk<TChunk>(value: string, status: number) {
+  let chunk: unknown;
+
   try {
-    return JSON.parse(value) as TChunk;
+    chunk = JSON.parse(value);
   } catch {
     throw new LangclawApiError(
       "Backend returned an invalid streaming response.",
       status,
     );
   }
+
+  if (!chunk || typeof chunk !== "object" || Array.isArray(chunk)) {
+    throw new LangclawApiError(
+      "Backend returned an unexpected streaming response.",
+      status,
+    );
+  }
+
+  return chunk as TChunk;
 }
 
 function readErrorMessage(value: unknown) {

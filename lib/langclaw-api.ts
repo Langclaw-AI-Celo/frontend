@@ -1964,8 +1964,207 @@ export async function getAutomationDashboard(wallet: WalletAuth) {
     action: "list",
     wallet,
   });
+  const payload = await readAutomationResponse<AutomationDashboard>(response);
 
-  return readAutomationResponse<AutomationDashboard>(response);
+  return requireAutomationDashboard(payload);
+}
+
+function requireAutomationDashboard(value: unknown) {
+  if (!isAutomationDashboard(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function isAutomationDashboard(value: unknown): value is AutomationDashboard {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    value.configured === true &&
+    Array.isArray(value.notifications) &&
+    value.notifications.every(isAutomationNotification) &&
+    Array.isArray(value.tasks) &&
+    value.tasks.every(isAutomationTask) &&
+    Array.isArray(value.recentRuns) &&
+    value.recentRuns.every(isAutomationRun) &&
+    isAutomationSettings(value.settings) &&
+    isAutomationStats(value.stats)
+  );
+}
+
+function isAutomationTask(value: unknown): value is AutomationTask {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    isNonEmptyResponseString(value.id) &&
+    isNonEmptyResponseString(value.name) &&
+    isNonEmptyResponseString(value.project) &&
+    isOptionalResponseString(value.prompt) &&
+    isOptionalResponseString(value.model) &&
+    ["schedule", "event", "webhook"].includes(String(value.triggerType)) &&
+    (value.scheduleFrequency === undefined ||
+      ["daily", "weekly", "monthly"].includes(
+        String(value.scheduleFrequency),
+      )) &&
+    isNonEmptyResponseString(value.scheduleTime) &&
+    (value.scheduleWeekday === undefined ||
+      isBoundedResponseInteger(value.scheduleWeekday, 0, 6)) &&
+    (value.scheduleMonthDay === undefined ||
+      isBoundedResponseInteger(value.scheduleMonthDay, 1, 31)) &&
+    isNonEmptyResponseString(value.timezone) &&
+    isOptionalResponseString(value.eventName) &&
+    isOptionalResponseString(value.webhookSlug) &&
+    ["draft", "active", "paused", "archived"].includes(
+      String(value.status),
+    ) &&
+    ["Draft", "Active", "Paused", "Running"].includes(
+      String(value.displayStatus),
+    ) &&
+    isNonEmptyResponseString(value.triggerLabel) &&
+    isOptionalResponseTimestamp(value.lastRunAt) &&
+    (value.lastRunStatus === undefined ||
+      isAutomationRunStatus(value.lastRunStatus)) &&
+    isOptionalResponseTimestamp(value.nextRunAt) &&
+    isNonNegativeResponseInteger(value.consecutiveFailures) &&
+    isNonNegativeResponseInteger(value.maxRetries) &&
+    isPositiveResponseInteger(value.failureThreshold) &&
+    isValidResponseTimestamp(value.createdAt) &&
+    isValidResponseTimestamp(value.updatedAt)
+  );
+}
+
+function isAutomationRun(value: unknown): value is AutomationRun {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    isNonEmptyResponseString(value.id) &&
+    isNonEmptyResponseString(value.taskId) &&
+    isOptionalResponseString(value.taskName) &&
+    isAutomationRunStatus(value.status) &&
+    ["schedule", "event", "webhook", "manual", "system"].includes(
+      String(value.triggeredBy),
+    ) &&
+    isPositiveResponseInteger(value.attempt) &&
+    isOptionalResponseTimestamp(value.scheduledFor) &&
+    isOptionalResponseTimestamp(value.startedAt) &&
+    isOptionalResponseTimestamp(value.completedAt) &&
+    (value.durationMs === undefined ||
+      isNonNegativeResponseInteger(value.durationMs)) &&
+    isOptionalResponseString(value.error) &&
+    isValidResponseTimestamp(value.createdAt)
+  );
+}
+
+function isAutomationRunStatus(value: unknown) {
+  return [
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "skipped",
+    "canceled",
+  ].includes(String(value));
+}
+
+function isAutomationNotification(
+  value: unknown,
+): value is AutomationInAppNotification {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    isNonEmptyResponseString(value.id) &&
+    isNonEmptyResponseString(value.title) &&
+    isNonEmptyResponseString(value.body) &&
+    (value.status === "unread" || value.status === "read") &&
+    isOptionalResponseString(value.taskId) &&
+    isOptionalResponseString(value.runId) &&
+    isOptionalResponseTimestamp(value.readAt) &&
+    isValidResponseTimestamp(value.createdAt)
+  );
+}
+
+function isAutomationSettings(value: unknown): value is AutomationSettings {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    ["none", "3-attempts", "5-attempts"].includes(
+      String(value.retryPolicy),
+    ) &&
+    ["email", "in-app", "none"].includes(
+      String(value.failureNotification),
+    ) &&
+    Array.isArray(value.notificationChannels) &&
+    value.notificationChannels.every((channel) =>
+      ["email", "telegram", "in-app"].includes(String(channel)),
+    ) &&
+    isOptionalResponseString(value.notificationEmail) &&
+    isOptionalResponseTimestamp(value.notificationEmailLinkedAt) &&
+    isOptionalResponseString(value.notificationEmailPending) &&
+    typeof value.notificationEmailVerified === "boolean" &&
+    isOptionalResponseString(value.telegramChatId) &&
+    isOptionalResponseTimestamp(value.telegramLinkedAt) &&
+    isOptionalResponseString(value.telegramUsername) &&
+    typeof value.telegramVerified === "boolean" &&
+    typeof value.autoPauseRepeatedFailures === "boolean" &&
+    typeof value.writeRunLogsToMemory === "boolean" &&
+    isNonEmptyResponseString(value.dailyLimit0G) &&
+    isNonEmptyResponseString(value.monthlyCap0G) &&
+    ["pause", "alert", "allow"].includes(String(value.limitBehavior)) &&
+    isNonEmptyResponseString(value.lowBalanceThreshold0G) &&
+    ["notify", "pause", "continue"].includes(String(value.thresholdAction))
+  );
+}
+
+function isAutomationStats(value: unknown): value is AutomationStats {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    [
+      value.activeTasks,
+      value.scheduledTasks,
+      value.eventTasks,
+      value.runningNow,
+      value.pendingRuns,
+      value.completedThisWeek,
+    ].every(isNonNegativeResponseInteger) &&
+    isBoundedResponseNumber(value.successRate, 0, 100) &&
+    isOptionalResponseTimestamp(value.nextRunAt) &&
+    isOptionalResponseString(value.nextRunTaskName)
+  );
+}
+
+function isResponseObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isBoundedResponseInteger(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+) {
+  return (
+    isFiniteResponseNumber(value) &&
+    Number.isInteger(value) &&
+    value >= minimum &&
+    value <= maximum
+  );
+}
+
+function invalidAutomationResponse() {
+  return new LangclawApiError("Backend returned invalid automation data.", 500);
 }
 
 export async function createAutomationTask(

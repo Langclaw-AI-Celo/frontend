@@ -8,6 +8,7 @@ import {
   createWalletSession,
   deleteAlphaWatchlistItem,
   deleteManyMemoryRecords,
+  getAutomationDashboard,
   getChatSession,
   getMemoryDashboard,
   getMemorySettings,
@@ -149,6 +150,36 @@ test("wallet session responses reject malformed session credentials", async (t) 
         error.status === 500,
     );
   }
+});
+
+test("automation dashboards reject malformed task, run, and settings data", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+  const valid = automationDashboardRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { ...valid, tasks: "invalid" },
+    { ...valid, recentRuns: [{ ...valid.recentRuns[0], attempt: "1" }] },
+    { ...valid, settings: { ...valid.settings, notificationChannels: "email" } },
+    { ...valid, stats: { ...valid.stats, activeTasks: -1 } },
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      getAutomationDashboard(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid automation data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () => Response.json(valid);
+  assert.deepEqual(await getAutomationDashboard(wallet), valid);
 });
 
 test("chat session responses reject malformed collections and records", async (t) => {
@@ -719,6 +750,100 @@ function walletChallengeRecord(overrides = {}) {
     nonce: "nonce-1",
     purpose: "session",
     uri: "https://langclawcelo.vercel.app",
+    ...overrides,
+  };
+}
+
+function walletSessionRecord(overrides = {}) {
+  return {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionExpiresAt: "2026-07-19T06:00:00.000Z",
+    sessionToken: "test-session",
+    ...overrides,
+  };
+}
+
+function automationTaskRecord(overrides = {}) {
+  return {
+    consecutiveFailures: 0,
+    createdAt: "2026-07-19T05:00:00.000Z",
+    displayStatus: "Active",
+    failureThreshold: 3,
+    id: "task-1",
+    maxRetries: 3,
+    metadata: {},
+    name: "Daily Celo review",
+    project: "Langclaw",
+    scheduleFrequency: "daily",
+    scheduleTime: "09:00",
+    status: "active",
+    timezone: "Asia/Jakarta",
+    triggerLabel: "Daily at 09:00",
+    triggerType: "schedule",
+    updatedAt: "2026-07-19T05:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function automationRunRecord(overrides = {}) {
+  return {
+    attempt: 1,
+    createdAt: "2026-07-19T05:00:00.000Z",
+    id: "run-1",
+    status: "completed",
+    taskId: "task-1",
+    taskName: "Daily Celo review",
+    triggeredBy: "manual",
+    ...overrides,
+  };
+}
+
+function automationNotificationRecord(overrides = {}) {
+  return {
+    body: "Daily Celo review completed.",
+    createdAt: "2026-07-19T05:00:00.000Z",
+    id: "notification-1",
+    metadata: {},
+    status: "unread",
+    title: "Automation completed",
+    ...overrides,
+  };
+}
+
+function automationSettingsRecord(overrides = {}) {
+  return {
+    autoPauseRepeatedFailures: true,
+    dailyLimit0G: "1",
+    failureNotification: "in-app",
+    limitBehavior: "pause",
+    lowBalanceThreshold0G: "0.1",
+    monthlyCap0G: "10",
+    notificationChannels: ["in-app"],
+    notificationEmailVerified: false,
+    retryPolicy: "3-attempts",
+    telegramVerified: false,
+    thresholdAction: "notify",
+    writeRunLogsToMemory: true,
+    ...overrides,
+  };
+}
+
+function automationDashboardRecord(overrides = {}) {
+  return {
+    configured: true,
+    notifications: [automationNotificationRecord()],
+    recentRuns: [automationRunRecord()],
+    settings: automationSettingsRecord(),
+    stats: {
+      activeTasks: 1,
+      completedThisWeek: 1,
+      eventTasks: 0,
+      pendingRuns: 0,
+      runningNow: 0,
+      scheduledTasks: 1,
+      successRate: 100,
+    },
+    tasks: [automationTaskRecord()],
     ...overrides,
   };
 }

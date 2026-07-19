@@ -1870,7 +1870,8 @@ function isApiKeyRecord(value: unknown): value is ApiKeyRecord {
     isOptionalResponseString(key.prefix) &&
     isOptionalResponseString(key.suffix) &&
     isOptionalResponseTimestamp(key.lastUsedAt) &&
-    isOptionalResponseTimestamp(key.revokedAt)
+    ((key.status === "active" && key.revokedAt === undefined) ||
+      (key.status === "revoked" && isValidResponseTimestamp(key.revokedAt)))
   );
 }
 

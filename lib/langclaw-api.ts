@@ -2323,7 +2323,7 @@ export async function getAutomationSettings(wallet: WalletAuth) {
     settings: AutomationSettings;
   }>(response);
 
-  return payload.settings;
+  return requireAutomationSettings(payload.settings);
 }
 
 export async function updateAutomationSettings(
@@ -2339,7 +2339,7 @@ export async function updateAutomationSettings(
     settings: AutomationSettings;
   }>(response);
 
-  return payload.settings;
+  return requireAutomationSettings(payload.settings);
 }
 
 export async function listInAppAutomationNotifications(
@@ -2412,7 +2412,7 @@ export async function verifyAutomationEmailLink(
     settings: AutomationSettings;
   }>(response);
 
-  return payload.settings;
+  return requireAutomationSettings(payload.settings);
 }
 
 export async function unlinkAutomationEmail(wallet: WalletAuth) {
@@ -2424,7 +2424,7 @@ export async function unlinkAutomationEmail(wallet: WalletAuth) {
     settings: AutomationSettings;
   }>(response);
 
-  return payload.settings;
+  return requireAutomationSettings(payload.settings);
 }
 
 export async function createAutomationTelegramLink(wallet: WalletAuth) {
@@ -2467,7 +2467,15 @@ export async function unlinkAutomationTelegram(wallet: WalletAuth) {
     settings: AutomationSettings;
   }>(response);
 
-  return payload.settings;
+  return requireAutomationSettings(payload.settings);
+}
+
+function requireAutomationSettings(value: unknown) {
+  if (!isAutomationSettings(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
 }
 
 export async function getUsageBalance(wallet: WalletAuth, chain?: ProductChainId) {

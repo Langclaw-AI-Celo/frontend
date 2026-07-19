@@ -771,6 +771,28 @@ test("API key responses reject malformed collections and records", async (t) => 
   }
 });
 
+test("API key responses reject unsupported statuses", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      keys: [apiKeyRecord({ status: "suspended" })],
+    });
+
+  await assert.rejects(
+    listApiKeys(walletSessionRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid API key data." &&
+      error.status === 500,
+  );
+});
+
 test("memory responses reject malformed records, settings, stats, and IDs", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {

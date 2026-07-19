@@ -613,7 +613,7 @@ export type ApiKeyRecord = {
   prefix?: string;
   suffix?: string;
   maskedKey: string;
-  status: "active" | "revoked" | (string & {});
+  status: "active" | "revoked";
   createdAt: string;
   lastUsedAt?: string;
   revokedAt?: string;
@@ -1865,7 +1865,7 @@ function isApiKeyRecord(value: unknown): value is ApiKeyRecord {
     isNonEmptyResponseString(key.id) &&
     isNonEmptyResponseString(key.name) &&
     isNonEmptyResponseString(key.maskedKey) &&
-    isNonEmptyResponseString(key.status) &&
+    (key.status === "active" || key.status === "revoked") &&
     isValidResponseTimestamp(key.createdAt) &&
     isOptionalResponseString(key.prefix) &&
     isOptionalResponseString(key.suffix) &&

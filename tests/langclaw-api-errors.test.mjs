@@ -17,6 +17,7 @@ import {
   readFriendlyError,
   revokeApiKey,
   runStrategyBacktest,
+  scanStrategyPairs,
   setMemoryStatus,
   streamChat,
   streamDiscover,
@@ -304,6 +305,42 @@ test("strategy backtests reject malformed response records", async (t) => {
     Response.json({ configured: true, backtest: valid });
   assert.deepEqual(
     await runStrategyBacktest({ chain: "celo", queryId: "123" }),
+    valid,
+  );
+});
+
+test("strategy pair scans reject malformed response records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const valid = strategyScanRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const scan of [
+    undefined,
+    "invalid",
+    { ...valid, bestBacktest: {} },
+    { ...valid, candidates: "invalid" },
+    {
+      ...valid,
+      candidates: [{ ...valid.candidates[0], rank: "1" }],
+    },
+  ]) {
+    globalThis.fetch = async () => Response.json({ configured: true, scan });
+
+    await assert.rejects(
+      scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid strategy scan data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () => Response.json({ configured: true, scan: valid });
+  assert.deepEqual(
+    await scanStrategyPairs({ chain: "celo", queryId: "123" }),
     valid,
   );
 });
@@ -625,6 +662,37 @@ function strategyBacktestRecord(overrides = {}) {
     strategyId: "celo-liquidity-momentum-v1",
     title: "Celo Liquidity Momentum Strategy",
     trades: [],
+    ...overrides,
+  };
+}
+
+function strategyScanRecord(overrides = {}) {
+  const bestBacktest = strategyBacktestRecord();
+
+  return {
+    bestBacktest,
+    candidates: [
+      {
+        latestSignal: bestBacktest.latestSignal,
+        latestTimestamp: "2026-07-19T05:00:00.000Z",
+        market: bestBacktest.market,
+        metrics: bestBacktest.metrics,
+        pairAddress: bestBacktest.pairAddress,
+        rank: 1,
+        rowCount: 12,
+        score: 150,
+        scoreReason: "0 trades / +0 bps PnL / HOLD latest signal",
+        totalVolumeUsd: 300_000,
+      },
+    ],
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    generatedAt: "2026-07-19T05:01:00.000Z",
+    queryId: "123",
+    scannedPairs: 1,
+    selectedPairAddress: bestBacktest.pairAddress,
+    sourceUrl: "https://api.dune.com/api/v1/query/123/results",
     ...overrides,
   };
 }

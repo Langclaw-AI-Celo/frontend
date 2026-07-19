@@ -2433,7 +2433,57 @@ export async function scanStrategyPairs(input: {
   const response = await postJson("/api/strategy/scan-pairs", input);
   const payload = await readJsonResponse<StrategyScanResponse>(response);
 
+  if (!isStrategyScan(payload.scan)) {
+    throw new LangclawApiError(
+      "Backend returned invalid strategy scan data.",
+      500,
+    );
+  }
+
   return payload.scan;
+}
+
+function isStrategyScan(value: unknown): value is StrategyScanPayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const scan = value as Record<string, unknown>;
+
+  return (
+    isStrategyBacktest(scan.bestBacktest) &&
+    isOptionalProductChain(scan.chain) &&
+    isOptionalPositiveResponseInteger(scan.chainId) &&
+    isOptionalResponseString(scan.chainName) &&
+    Array.isArray(scan.candidates) &&
+    scan.candidates.every(isStrategyScanCandidate) &&
+    isValidResponseTimestamp(scan.generatedAt) &&
+    isNonEmptyResponseString(scan.queryId) &&
+    isNonNegativeResponseInteger(scan.scannedPairs) &&
+    isNonEmptyResponseString(scan.selectedPairAddress) &&
+    isNonEmptyResponseString(scan.sourceUrl)
+  );
+}
+
+function isStrategyScanCandidate(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+
+  return (
+    isStrategySignal(candidate.latestSignal) &&
+    isValidResponseTimestamp(candidate.latestTimestamp) &&
+    isNonEmptyResponseString(candidate.market) &&
+    isStrategyMetrics(candidate.metrics) &&
+    isNonEmptyResponseString(candidate.pairAddress) &&
+    isPositiveResponseInteger(candidate.rank) &&
+    isNonNegativeResponseInteger(candidate.rowCount) &&
+    isFiniteResponseNumber(candidate.score) &&
+    isNonEmptyResponseString(candidate.scoreReason) &&
+    isNonNegativeResponseNumber(candidate.totalVolumeUsd)
+  );
 }
 
 export async function openStrategyPaperTrade(input: {

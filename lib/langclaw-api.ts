@@ -1450,6 +1450,7 @@ function isWalletChallenge(value: unknown): value is WalletChallenge {
     Number.isFinite(issuedAt) &&
     Number.isFinite(expiresAt) &&
     expiresAt > issuedAt &&
+    expiresAt > Date.now() &&
     isNonEmptyResponseString(challenge.message) &&
     isNonEmptyResponseString(challenge.nonce) &&
     (challenge.purpose === "api-key:create" ||

@@ -259,6 +259,33 @@ test("wallet challenge responses reject malformed signing data", async (t) => {
   }
 });
 
+test("wallet challenge responses reject expired challenges", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const challenge = walletChallengeRecord({
+    expiresAt: "2026-07-19T05:05:00.000Z",
+    issuedAt: "2026-07-19T05:00:00.000Z",
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ challenge, configured: true });
+
+  await assert.rejects(
+    requestWalletChallenge({
+      address: challenge.address,
+      chainId: challenge.chainId,
+      purpose: challenge.purpose,
+    }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid wallet challenge data." &&
+      error.status === 500,
+  );
+});
+
 test("wallet challenges must match the requested account and purpose", async (t) => {
   const originalFetch = globalThis.fetch;
   const challenge = walletChallengeRecord();
@@ -1257,12 +1284,14 @@ function chatSessionRecord(overrides = {}) {
 }
 
 function walletChallengeRecord(overrides = {}) {
+  const now = Date.now();
+
   return {
     address: "0x1111111111111111111111111111111111111111",
     chainId: 42220,
     domain: "langclawcelo.vercel.app",
-    expiresAt: "2026-07-19T05:05:00.000Z",
-    issuedAt: "2026-07-19T05:00:00.000Z",
+    expiresAt: new Date(now + 4 * 60 * 1000).toISOString(),
+    issuedAt: new Date(now - 60 * 1000).toISOString(),
     message: "Sign in to Langclaw.",
     nonce: "nonce-1",
     purpose: "session",

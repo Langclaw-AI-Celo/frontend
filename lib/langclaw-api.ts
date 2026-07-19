@@ -2180,7 +2180,7 @@ export async function createAutomationTask(
     response,
   );
 
-  return payload.task;
+  return requireAutomationTask(payload.task);
 }
 
 export async function updateAutomationTask(
@@ -2198,7 +2198,7 @@ export async function updateAutomationTask(
     response,
   );
 
-  return payload.task;
+  return requireAutomationTask(payload.task);
 }
 
 export async function setAutomationTaskStatus(
@@ -2215,7 +2215,7 @@ export async function setAutomationTaskStatus(
     response,
   );
 
-  return payload.task;
+  return requireAutomationTask(payload.task);
 }
 
 export async function deleteAutomationTask(
@@ -2229,7 +2229,7 @@ export async function deleteAutomationTask(
   });
   const payload = await readAutomationResponse<{ deleted?: boolean }>(response);
 
-  return Boolean(payload.deleted);
+  return requireAutomationBoolean(payload.deleted);
 }
 
 export async function setAllAutomationTasksStatus(
@@ -2244,7 +2244,31 @@ export async function setAllAutomationTasksStatus(
     response,
   );
 
-  return payload.tasks ?? [];
+  return requireAutomationTasks(payload.tasks);
+}
+
+function requireAutomationTask(value: unknown) {
+  if (!isAutomationTask(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function requireAutomationTasks(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isAutomationTask)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function requireAutomationBoolean(value: unknown) {
+  if (typeof value !== "boolean") {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
 }
 
 export async function runAutomationTask(wallet: WalletAuth, taskId: string) {

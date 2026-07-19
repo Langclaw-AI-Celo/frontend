@@ -5,7 +5,9 @@ import {
   checkBackendHealth,
   clearAlphaWatchlist,
   createApiKey,
+  createAutomationTask,
   createWalletSession,
+  deleteAutomationTask,
   deleteAlphaWatchlistItem,
   deleteManyMemoryRecords,
   getAutomationDashboard,
@@ -23,9 +25,12 @@ import {
   revokeApiKey,
   runStrategyBacktest,
   scanStrategyPairs,
+  setAllAutomationTasksStatus,
+  setAutomationTaskStatus,
   setMemoryStatus,
   streamChat,
   streamDiscover,
+  updateAutomationTask,
   upsertAlphaWatchlistItem,
 } from "../lib/langclaw-api.ts";
 
@@ -180,6 +185,50 @@ test("automation dashboards reject malformed task, run, and settings data", asyn
 
   globalThis.fetch = async () => Response.json(valid);
   assert.deepEqual(await getAutomationDashboard(wallet), valid);
+});
+
+test("automation task mutations reject malformed records and flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const request of [
+    () => createAutomationTask(wallet, { name: "Task" }),
+    () => updateAutomationTask(wallet, "task-1", { name: "Task" }),
+    () => setAutomationTaskStatus(wallet, "task-1", "active"),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, task: { id: "task-1" } });
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid automation data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, deleted: "false" });
+  await assert.rejects(
+    deleteAutomationTask(wallet, "task-1"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid automation data.",
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, tasks: [automationTaskRecord({ id: "" })] });
+  await assert.rejects(
+    setAllAutomationTasksStatus(wallet, "paused"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid automation data.",
+  );
 });
 
 test("chat session responses reject malformed collections and records", async (t) => {

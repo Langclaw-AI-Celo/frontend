@@ -2609,6 +2609,15 @@ function parseNdjsonChunk<TChunk>(value: string, status: number) {
     );
   }
 
+  const type = (chunk as Record<string, unknown>).type;
+
+  if (typeof type !== "string" || !type.trim()) {
+    throw new LangclawApiError(
+      "Backend returned an unexpected streaming response.",
+      status,
+    );
+  }
+
   return chunk as TChunk;
 }
 

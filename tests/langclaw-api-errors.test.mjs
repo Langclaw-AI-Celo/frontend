@@ -96,6 +96,35 @@ test("streaming responses reject non-object NDJSON chunks", async (t) => {
   }
 });
 
+test("streaming responses reject chunks without an event type", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const body of [
+    "{}\n",
+    '{"type":null}\n',
+    '{"type":42}\n',
+    '{"type":" "}\n',
+  ]) {
+    globalThis.fetch = async () =>
+      new Response(body, {
+        headers: { "Content-Type": "application/x-ndjson" },
+        status: 200,
+      });
+
+    await assert.rejects(
+      streamDiscover({ topic: "CELO" }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned an unexpected streaming response." &&
+        error.status === 200,
+    );
+  }
+});
+
 test("insufficient balance errors keep the currency reported by the backend", () => {
   for (const symbol of ["CELO", "MNT", "USDT"]) {
     const message = readFriendlyError(

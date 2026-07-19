@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   checkBackendHealth,
+  getChatSession,
   LangclawApiError,
+  listChatSessions,
   readFriendlyError,
   streamChat,
   streamDiscover,
@@ -49,6 +51,54 @@ test("successful responses reject non-object JSON bodies", async (t) => {
         error.status === 200,
     );
   }
+});
+
+test("chat session responses reject malformed collections and records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionToken: "test-session",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const sessions of [
+    "invalid",
+    [null],
+    [chatSessionRecord({ messages: "invalid" })],
+    [
+      chatSessionRecord({
+        messages: [{ content: "hello", id: "m1", role: "tool" }],
+      }),
+    ],
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, sessions });
+
+    await assert.rejects(
+      listChatSessions(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid chat session data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      session: chatSessionRecord({ updatedAt: "not-a-date" }),
+    });
+
+  await assert.rejects(
+    getChatSession(wallet, "session-1"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid chat session data." &&
+      error.status === 500,
+  );
 });
 
 test("streaming responses reject malformed NDJSON chunks", async (t) => {
@@ -244,6 +294,18 @@ test("insufficient balance errors keep the currency reported by the backend", ()
     );
   }
 });
+
+function chatSessionRecord(overrides = {}) {
+  return {
+    createdAt: "2026-07-19T05:00:00.000Z",
+    id: "session-1",
+    messages: [],
+    pinned: false,
+    title: "CELO research",
+    updatedAt: "2026-07-19T05:01:00.000Z",
+    ...overrides,
+  };
+}
 
 test("payment errors without a currency use neutral credit guidance", () => {
   const message = readFriendlyError(

@@ -1594,7 +1594,7 @@ export async function streamChat(input: ChatStreamInput) {
 export async function listChatSessions(wallet: WalletAuth) {
   const response = await chatSessionsRequest({ action: "list", wallet });
 
-  return response.sessions ?? [];
+  return requireChatSessions(response.sessions);
 }
 
 export async function getChatSession(wallet: WalletAuth, sessionId: string) {
@@ -1604,7 +1604,7 @@ export async function getChatSession(wallet: WalletAuth, sessionId: string) {
     wallet,
   });
 
-  return response.session ?? null;
+  return readOptionalChatSession(response.session);
 }
 
 export async function upsertChatSession(
@@ -1617,7 +1617,7 @@ export async function upsertChatSession(
     wallet,
   });
 
-  return response.session ?? null;
+  return readOptionalChatSession(response.session);
 }
 
 export async function deleteChatSession(wallet: WalletAuth, sessionId: string) {
@@ -1646,7 +1646,79 @@ export async function updateChatSessionMetadata(
     wallet,
   });
 
-  return response.session ?? null;
+  return readOptionalChatSession(response.session);
+}
+
+function requireChatSessions(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isChatSession)) {
+    throw invalidChatSessionResponse();
+  }
+
+  return value as ChatSession[];
+}
+
+function readOptionalChatSession(value: unknown) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (!isChatSession(value)) {
+    throw invalidChatSessionResponse();
+  }
+
+  return value as ChatSession;
+}
+
+function isChatSession(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const session = value as Record<string, unknown>;
+
+  return (
+    isNonEmptyResponseString(session.id) &&
+    isNonEmptyResponseString(session.title) &&
+    isValidResponseTimestamp(session.createdAt) &&
+    isValidResponseTimestamp(session.updatedAt) &&
+    (session.pinned === undefined || typeof session.pinned === "boolean") &&
+    Array.isArray(session.messages) &&
+    session.messages.every(isStoredChatMessage)
+  );
+}
+
+function isStoredChatMessage(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const message = value as Record<string, unknown>;
+
+  return (
+    isNonEmptyResponseString(message.id) &&
+    (message.role === "assistant" || message.role === "user") &&
+    typeof message.content === "string" &&
+    (message.stopped === undefined || typeof message.stopped === "boolean")
+  );
+}
+
+function isNonEmptyResponseString(value: unknown) {
+  return typeof value === "string" && Boolean(value.trim());
+}
+
+function isValidResponseTimestamp(value: unknown) {
+  return (
+    typeof value === "string" &&
+    Boolean(value.trim()) &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+
+function invalidChatSessionResponse() {
+  return new LangclawApiError(
+    "Backend returned invalid chat session data.",
+    500,
+  );
 }
 
 export async function listApiKeys(wallet: WalletAuth) {

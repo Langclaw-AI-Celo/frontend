@@ -700,6 +700,33 @@ test("chat session responses reject malformed collections and records", async (t
   );
 });
 
+test("chat session responses reject reversed timestamps", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      sessions: [
+        chatSessionRecord({
+          createdAt: "2026-07-19T05:02:00.000Z",
+          updatedAt: "2026-07-19T05:01:00.000Z",
+        }),
+      ],
+    });
+
+  await assert.rejects(
+    listChatSessions(walletSessionRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid chat session data." &&
+      error.status === 500,
+  );
+});
+
 test("API key responses reject malformed collections and records", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {

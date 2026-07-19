@@ -1756,12 +1756,15 @@ function isChatSession(value: unknown) {
   }
 
   const session = value as Record<string, unknown>;
+  const createdAt = session.createdAt;
+  const updatedAt = session.updatedAt;
 
   return (
     isNonEmptyResponseString(session.id) &&
     isNonEmptyResponseString(session.title) &&
-    isValidResponseTimestamp(session.createdAt) &&
-    isValidResponseTimestamp(session.updatedAt) &&
+    isValidResponseTimestamp(createdAt) &&
+    isValidResponseTimestamp(updatedAt) &&
+    Date.parse(updatedAt) >= Date.parse(createdAt) &&
     (session.pinned === undefined || typeof session.pinned === "boolean") &&
     Array.isArray(session.messages) &&
     session.messages.every(isStoredChatMessage)

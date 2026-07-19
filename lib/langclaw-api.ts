@@ -1413,7 +1413,12 @@ export async function requestWalletChallenge(input: {
     throw new LangclawApiError("Wallet challenge was not returned.", 500);
   }
 
-  if (!isWalletChallenge(payload.challenge)) {
+  if (
+    !isWalletChallenge(payload.challenge) ||
+    payload.challenge.address.toLowerCase() !== input.address.trim().toLowerCase() ||
+    (input.chainId !== undefined && payload.challenge.chainId !== input.chainId) ||
+    payload.challenge.purpose !== (input.purpose ?? "session")
+  ) {
     throw new LangclawApiError(
       "Backend returned invalid wallet challenge data.",
       500,
@@ -1469,7 +1474,10 @@ export async function createWalletSession(wallet: WalletAuth) {
     throw new LangclawApiError("Wallet session was not returned.", 500);
   }
 
-  if (!isWalletSession(payload.wallet)) {
+  if (
+    !isWalletSession(payload.wallet) ||
+    payload.wallet.address.toLowerCase() !== wallet.address.trim().toLowerCase()
+  ) {
     throw new LangclawApiError(
       "Backend returned invalid wallet session data.",
       500,
@@ -1695,7 +1703,11 @@ export async function deleteChatSession(wallet: WalletAuth, sessionId: string) {
     wallet,
   });
 
-  return Boolean(response.deleted);
+  if (typeof response.deleted !== "boolean") {
+    throw invalidChatSessionResponse();
+  }
+
+  return response.deleted;
 }
 
 export async function updateChatSessionMetadata(
@@ -1923,7 +1935,7 @@ export async function deleteMemoryRecord(
 
   return readDeletedMemoryIds(
     response.deletedIds,
-    response.deleted ? [memoryId] : [],
+    readMemoryMutationFlag(response.deleted) ? [memoryId] : [],
   );
 }
 
@@ -2838,7 +2850,7 @@ export async function runStrategyBacktest(input: {
   const response = await postJson("/api/strategy/backtest", input);
   const payload = await readJsonResponse<StrategyBacktestResponse>(response);
 
-  if (!isStrategyBacktest(payload.backtest)) {
+  if (payload.configured !== true || !isStrategyBacktest(payload.backtest)) {
     throw new LangclawApiError(
       "Backend returned invalid strategy backtest data.",
       500,
@@ -3060,7 +3072,7 @@ export async function scanStrategyPairs(input: {
   const response = await postJson("/api/strategy/scan-pairs", input);
   const payload = await readJsonResponse<StrategyScanResponse>(response);
 
-  if (!isStrategyScan(payload.scan)) {
+  if (payload.configured !== true || !isStrategyScan(payload.scan)) {
     throw new LangclawApiError(
       "Backend returned invalid strategy scan data.",
       500,
@@ -3121,7 +3133,10 @@ export async function openStrategyPaperTrade(input: {
   const response = await postJson("/api/strategy/paper-trade", input);
   const payload = await readJsonResponse<StrategyPaperTradeResponse>(response);
 
-  if (!isStrategyPaperTrade(payload.paperTrade)) {
+  if (
+    payload.configured !== true ||
+    !isStrategyPaperTrade(payload.paperTrade)
+  ) {
     throw new LangclawApiError(
       "Backend returned invalid strategy paper trade data.",
       500,
@@ -3242,6 +3257,7 @@ export async function listAlphaWatchlist(wallet: WalletAuth) {
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
+  requireWatchlistConfigured(payload.configured);
   return requireWatchlistItems(payload.items);
 }
 
@@ -3256,6 +3272,7 @@ export async function upsertAlphaWatchlistItem(
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
+  requireWatchlistConfigured(payload.configured);
   if (!isWatchlistItem(payload.item)) {
     throw invalidWatchlistResponse();
   }
@@ -3274,6 +3291,7 @@ export async function deleteAlphaWatchlistItem(
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
+  requireWatchlistConfigured(payload.configured);
   return readWatchlistMutationFlag(payload.deleted);
 }
 
@@ -3284,7 +3302,14 @@ export async function clearAlphaWatchlist(wallet: WalletAuth) {
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
+  requireWatchlistConfigured(payload.configured);
   return readWatchlistMutationFlag(payload.cleared);
+}
+
+function requireWatchlistConfigured(value: unknown) {
+  if (value !== true) {
+    throw invalidWatchlistResponse();
+  }
 }
 
 function requireWatchlistItems(value: unknown) {
@@ -3365,11 +3390,15 @@ async function chatSessionsRequest(body: {
   const response = await postJson("/api/chat/sessions", body);
   const payload = await readJsonResponse<ChatSessionsResponse>(response);
 
-  if (!payload.configured) {
+  if (payload.configured === false) {
     throw new LangclawApiError(
       payload.error || "Chat session storage is not configured.",
       503,
     );
+  }
+
+  if (payload.configured !== true) {
+    throw invalidChatSessionResponse();
   }
 
   if (payload.error) {
@@ -3388,11 +3417,15 @@ async function apiKeysRequest(body: {
   const response = await postJson("/api/api-keys", body);
   const payload = await readJsonResponse<ApiKeysResponse>(response);
 
-  if (!payload.configured) {
+  if (payload.configured === false) {
     throw new LangclawApiError(
       payload.error || "API keys are not configured.",
       503,
     );
+  }
+
+  if (payload.configured !== true) {
+    throw invalidApiKeyResponse();
   }
 
   if (payload.error) {
@@ -3412,11 +3445,15 @@ async function memoryRequest(body: {
   const response = await postJson("/api/memory", body);
   const payload = await readJsonResponse<MemoryResponse>(response);
 
-  if (!payload.configured) {
+  if (payload.configured === false) {
     throw new LangclawApiError(
       payload.error || "Memory storage is not configured.",
       503,
     );
+  }
+
+  if (payload.configured !== true) {
+    throw invalidMemoryResponse();
   }
 
   if (payload.error) {
@@ -3434,11 +3471,15 @@ async function memorySettingsRequest(body: {
   const response = await postJson("/api/memory/settings", body);
   const payload = await readJsonResponse<MemoryResponse>(response);
 
-  if (!payload.configured) {
+  if (payload.configured === false) {
     throw new LangclawApiError(
       payload.error || "Memory settings are not configured.",
       503,
     );
+  }
+
+  if (payload.configured !== true) {
+    throw invalidMemoryResponse();
   }
 
   if (payload.error) {
@@ -3531,7 +3572,9 @@ function requireMemoryStats(value: unknown) {
   if (
     ![stats.active, stats.disabled, stats.projectScoped, stats.total].every(
       (entry) => typeof entry === "number" && Number.isInteger(entry) && entry >= 0,
-    )
+    ) ||
+    (stats.active as number) + (stats.disabled as number) !== stats.total ||
+    (stats.projectScoped as number) > (stats.total as number)
   ) {
     throw invalidMemoryResponse();
   }
@@ -3549,6 +3592,18 @@ function readDeletedMemoryIds(value: unknown, fallback: string[]) {
   }
 
   return value as string[];
+}
+
+function readMemoryMutationFlag(value: unknown) {
+  if (value === undefined) {
+    return false;
+  }
+
+  if (typeof value !== "boolean") {
+    throw invalidMemoryResponse();
+  }
+
+  return value;
 }
 
 function invalidMemoryResponse() {

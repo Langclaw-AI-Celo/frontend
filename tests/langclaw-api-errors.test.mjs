@@ -8,8 +8,10 @@ import {
   createAutomationTask,
   createAutomationTelegramLink,
   createWalletSession,
+  deleteChatSession,
   deleteAutomationTask,
   deleteAlphaWatchlistItem,
+  deleteMemoryRecord,
   deleteManyMemoryRecords,
   getAutomationDashboard,
   getAutomationSettings,
@@ -52,6 +54,116 @@ import {
   verifyAutomationEmailLink,
   verifyUsageDeposit,
 } from "../lib/langclaw-api.ts";
+
+test("chat session deletion rejects malformed mutation flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, deleted: "false" });
+
+  await assert.rejects(
+    deleteChatSession(walletSessionRecord(), "session-1"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid chat session data." &&
+      error.status === 500,
+  );
+});
+
+test("chat session responses reject malformed configured flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: "true", sessions: [] });
+
+  await assert.rejects(
+    listChatSessions(walletSessionRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid chat session data." &&
+      error.status === 500,
+  );
+});
+
+test("API key responses reject malformed configured flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: 1, keys: [] });
+
+  await assert.rejects(
+    listApiKeys(walletSessionRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid API key data." &&
+      error.status === 500,
+  );
+});
+
+test("memory deletion rejects malformed mutation flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, deleted: "false" });
+
+  await assert.rejects(
+    deleteMemoryRecord(walletSessionRecord(), "memory-1"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid memory data." &&
+      error.status === 500,
+  );
+});
+
+test("memory responses reject malformed configured flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, payload] of [
+    [
+      () => getMemoryDashboard(wallet),
+      {
+        configured: "true",
+        memories: [],
+        settings: memorySettings(),
+      },
+    ],
+    [
+      () => getMemorySettings(wallet),
+      { configured: 1, settings: memorySettings() },
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid memory data." &&
+        error.status === 500,
+    );
+  }
+});
 
 test("successful responses reject invalid JSON bodies", async (t) => {
   const originalFetch = globalThis.fetch;
@@ -147,6 +259,37 @@ test("wallet challenge responses reject malformed signing data", async (t) => {
   }
 });
 
+test("wallet challenges must match the requested account and purpose", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const challenge = walletChallengeRecord();
+  const request = {
+    address: challenge.address,
+    chainId: challenge.chainId,
+    purpose: challenge.purpose,
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const mismatchedChallenge of [
+    { ...challenge, address: "0x2222222222222222222222222222222222222222" },
+    { ...challenge, chainId: 5000 },
+    { ...challenge, purpose: "api-key:create" },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ challenge: mismatchedChallenge, configured: true });
+
+    await assert.rejects(
+      requestWalletChallenge(request),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid wallet challenge data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("wallet session responses reject malformed session credentials", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {
@@ -174,6 +317,35 @@ test("wallet session responses reject malformed session credentials", async (t) 
         error.status === 500,
     );
   }
+});
+
+test("wallet sessions must match the authenticated account", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    message: "Sign in",
+    signature: "0xsigned",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      wallet: walletSessionRecord({
+        address: "0x2222222222222222222222222222222222222222",
+      }),
+    });
+
+  await assert.rejects(
+    createWalletSession(wallet),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid wallet session data." &&
+      error.status === 500,
+  );
 });
 
 test("automation dashboards reject malformed task, run, and settings data", async (t) => {
@@ -580,6 +752,39 @@ test("memory responses reject malformed records, settings, stats, and IDs", asyn
   );
 });
 
+test("memory responses reject inconsistent statistics", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionToken: "test-session",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const stats of [
+    { active: 1, disabled: 0, projectScoped: 0, total: 0 },
+    { active: 0, disabled: 0, projectScoped: 1, total: 0 },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({
+        configured: true,
+        memories: [],
+        settings: memorySettings(),
+        stats,
+      });
+
+    await assert.rejects(
+      getMemoryDashboard(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid memory data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("watchlist responses reject malformed items and mutation flags", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {
@@ -619,6 +824,38 @@ test("watchlist responses reject malformed items and mutation flags", async (t) 
   ]) {
     globalThis.fetch = async () =>
       Response.json({ configured: true, ...responseBody });
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid watchlist data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("watchlist responses require configured envelopes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, payload] of [
+    [() => listAlphaWatchlist(wallet), { configured: false, items: [] }],
+    [
+      () => upsertAlphaWatchlistItem(wallet, watchlistRecord()),
+      { configured: "true", item: watchlistRecord() },
+    ],
+    [
+      () => deleteAlphaWatchlistItem(wallet, "watch-1"),
+      { configured: 1, deleted: true },
+    ],
+    [() => clearAlphaWatchlist(wallet), { cleared: true }],
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
 
     await assert.rejects(
       request(),
@@ -774,6 +1011,43 @@ test("strategy run history rejects malformed response records", async (t) => {
 
   globalThis.fetch = async () => Response.json(valid);
   assert.deepEqual(await listStrategyRuns(25, "celo"), valid);
+});
+
+test("strategy mutations require configured response envelopes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, payload, message] of [
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      { backtest, configured: false },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      { configured: "true", scan: strategyScanRecord() },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      { paperTrade: strategyPaperTradeRecord() },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
 });
 
 test("streaming responses reject malformed NDJSON chunks", async (t) => {

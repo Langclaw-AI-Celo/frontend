@@ -2545,8 +2545,67 @@ function isStrategyPaperTrade(
 
 export async function listStrategyRuns(limit = 25, chain?: ProductChainId) {
   const response = await postJson("/api/strategy/runs", { chain, limit });
+  const payload = await readJsonResponse<StrategyRunsPayload>(response);
 
-  return readJsonResponse<StrategyRunsPayload>(response);
+  if (!isStrategyRuns(payload)) {
+    throw new LangclawApiError(
+      "Backend returned invalid strategy run data.",
+      500,
+    );
+  }
+
+  return payload;
+}
+
+function isStrategyRuns(value: unknown): value is StrategyRunsPayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const runs = value as Record<string, unknown>;
+
+  return (
+    isOptionalProductChain(runs.chain) &&
+    isPositiveResponseInteger(runs.chainId) &&
+    isOptionalResponseString(runs.chainName) &&
+    typeof runs.configured === "boolean" &&
+    isOptionalResponseString(runs.error) &&
+    isOptionalResponseString(runs.journalAddress) &&
+    isNonEmptyResponseString(runs.nextRecordId) &&
+    Array.isArray(runs.records) &&
+    runs.records.every(isStrategyRunRecord)
+  );
+}
+
+function isStrategyRunRecord(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return (
+    ["buy", "sell", "hold", "exit"].includes(String(record.action)) &&
+    isNonEmptyResponseString(record.agentId) &&
+    isOptionalProductChain(record.chain) &&
+    isOptionalPositiveResponseInteger(record.chainId) &&
+    isOptionalResponseString(record.chainName) &&
+    isValidResponseTimestamp(record.createdAt) &&
+    isNonEmptyResponseString(record.decisionHash) &&
+    isNonEmptyResponseString(record.evidenceUri) &&
+    isOptionalResponseString(record.explorerUrl) &&
+    isNonEmptyResponseString(record.market) &&
+    isFiniteResponseNumber(record.pnlBps) &&
+    isNonEmptyResponseString(record.recordId) &&
+    isNonEmptyResponseString(record.recorder) &&
+    isNonEmptyResponseString(record.resultHash) &&
+    isNonEmptyResponseString(record.runId) &&
+    ["backtested", "paper-opened", "paper-closed"].includes(
+      String(record.status),
+    ) &&
+    isNonEmptyResponseString(record.strategyId) &&
+    isOptionalResponseString(record.txHash)
+  );
 }
 
 export async function listAlphaWatchlist(wallet: WalletAuth) {

@@ -14,6 +14,7 @@ import {
   listApiKeys,
   listAlphaWatchlist,
   listChatSessions,
+  listStrategyRuns,
   openStrategyPaperTrade,
   readFriendlyError,
   revokeApiKey,
@@ -384,6 +385,38 @@ test("strategy paper trades reject malformed response records", async (t) => {
     }),
     valid,
   );
+});
+
+test("strategy run history rejects malformed response records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const valid = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { ...valid, chainId: "42220" },
+    { ...valid, nextRecordId: 1 },
+    { ...valid, records: "invalid" },
+    {
+      ...valid,
+      records: [{ ...valid.records[0], status: "unknown" }],
+    },
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      listStrategyRuns(25, "celo"),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid strategy run data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () => Response.json(valid);
+  assert.deepEqual(await listStrategyRuns(25, "celo"), valid);
 });
 
 test("streaming responses reject malformed NDJSON chunks", async (t) => {
@@ -768,6 +801,40 @@ function strategyPaperTradeRecord(overrides = {}) {
     referenceBacktestRunId: "bt-test",
     runId: "paper-test",
     strategyId: "celo-liquidity-momentum-v1",
+    ...overrides,
+  };
+}
+
+function strategyRunsRecord(overrides = {}) {
+  const pairAddress = "0xeAfc4D6d4c3391Cd4Fc10c85D2f5f972d58C0dD5";
+
+  return {
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    configured: true,
+    journalAddress: "0x1111111111111111111111111111111111111111",
+    nextRecordId: "1",
+    records: [
+      {
+        action: "hold",
+        agentId: "133",
+        chain: "celo",
+        chainId: 42220,
+        chainName: "Celo",
+        createdAt: "2026-07-19T05:02:00.000Z",
+        decisionHash: `0x${"1".repeat(64)}`,
+        evidenceUri: "langclaw://strategy/paper-test",
+        market: `celo:${pairAddress}`,
+        pnlBps: 0,
+        recordId: "0",
+        recorder: "0x2222222222222222222222222222222222222222",
+        resultHash: `0x${"2".repeat(64)}`,
+        runId: "paper-test",
+        status: "paper-opened",
+        strategyId: "celo-liquidity-momentum-v1",
+      },
+    ],
     ...overrides,
   };
 }

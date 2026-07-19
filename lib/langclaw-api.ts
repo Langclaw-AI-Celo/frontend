@@ -2053,6 +2053,10 @@ function isAutomationTask(value: unknown): value is AutomationTask {
     isNonEmptyResponseString(value.timezone) &&
     isOptionalResponseString(value.eventName) &&
     isOptionalResponseString(value.webhookSlug) &&
+    (value.triggerType !== "event" ||
+      isNonEmptyResponseString(value.eventName)) &&
+    (value.triggerType !== "webhook" ||
+      isNonEmptyResponseString(value.webhookSlug)) &&
     ["draft", "active", "paused", "archived"].includes(
       String(value.status),
     ) &&

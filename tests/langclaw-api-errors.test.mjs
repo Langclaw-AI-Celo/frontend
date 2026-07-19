@@ -433,6 +433,31 @@ test("automation dashboards reject malformed task, run, and settings data", asyn
   assert.deepEqual(await getAutomationDashboard(wallet), valid);
 });
 
+test("automation tasks require metadata for their trigger type", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const task of [
+    automationTaskRecord({ eventName: undefined, triggerType: "event" }),
+    automationTaskRecord({ triggerType: "webhook", webhookSlug: undefined }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json(automationDashboardRecord({ tasks: [task] }));
+
+    await assert.rejects(
+      getAutomationDashboard(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid automation data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("automation task mutations reject malformed records and flags", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

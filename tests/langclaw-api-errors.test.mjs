@@ -998,6 +998,35 @@ test("automation Telegram links reject expired responses", async (t) => {
   );
 });
 
+test("automation Telegram links bind commands and deep links to their code", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+  const link = {
+    botUsername: "langclaw_bot",
+    code: "ABC123",
+    command: "/link ABC123",
+    deepLink: "https://t.me/langclaw_bot?start=ABC123",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const malformedLink of [
+    { ...link, command: "/link DIFFERENT" },
+    { ...link, deepLink: "https://example.com/?start=ABC123" },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, link: malformedLink });
+
+    await assert.rejects(
+      createAutomationTelegramLink(wallet),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation notifications reject inconsistent read state", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

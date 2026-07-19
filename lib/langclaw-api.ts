@@ -2670,13 +2670,19 @@ function requireAutomationTelegramLink(value: unknown) {
     throw invalidAutomationResponse();
   }
 
+  const botUsername = value.botUsername;
+  const code = value.code;
+  const command = value.command;
+  const deepLink = value.deepLink;
+
   if (
-    ![
-      value.botUsername,
-      value.code,
-      value.command,
-      value.deepLink,
-    ].every(isNonEmptyResponseString) ||
+    typeof botUsername !== "string" ||
+    !/^[A-Za-z0-9_]{5,32}$/.test(botUsername) ||
+    typeof code !== "string" ||
+    !/^[A-Za-z0-9]{4,32}$/.test(code) ||
+    command !== `/link ${code}` ||
+    deepLink !==
+      `https://t.me/${botUsername}?start=${encodeURIComponent(code)}` ||
     !isFutureResponseTimestamp(value.expiresAt)
   ) {
     throw invalidAutomationResponse();

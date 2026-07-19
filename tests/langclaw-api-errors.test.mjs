@@ -746,6 +746,33 @@ test("automation settings endpoints reject malformed configuration data", async 
   }
 });
 
+test("verified automation channels require linked destinations", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const settings of [
+    automationSettingsRecord({
+      notificationChannels: ["email", "in-app"],
+      notificationEmailVerified: true,
+    }),
+    automationSettingsRecord({
+      notificationChannels: ["telegram", "in-app"],
+      telegramVerified: true,
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, settings });
+
+    await assert.rejects(
+      getAutomationSettings(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation notification endpoints reject malformed delivery data", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

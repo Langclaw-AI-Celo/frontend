@@ -2212,10 +2212,18 @@ function isAutomationSettings(value: unknown): value is AutomationSettings {
     isOptionalResponseTimestamp(value.notificationEmailLinkedAt) &&
     isOptionalResponseString(value.notificationEmailPending) &&
     typeof value.notificationEmailVerified === "boolean" &&
+    (!value.notificationEmailVerified ||
+      (isNonEmptyResponseString(value.notificationEmail) &&
+        isValidResponseTimestamp(value.notificationEmailLinkedAt) &&
+        value.notificationChannels.includes("email"))) &&
     isOptionalResponseString(value.telegramChatId) &&
     isOptionalResponseTimestamp(value.telegramLinkedAt) &&
     isOptionalResponseString(value.telegramUsername) &&
     typeof value.telegramVerified === "boolean" &&
+    (!value.telegramVerified ||
+      (isNonEmptyResponseString(value.telegramChatId) &&
+        isValidResponseTimestamp(value.telegramLinkedAt) &&
+        value.notificationChannels.includes("telegram"))) &&
     typeof value.autoPauseRepeatedFailures === "boolean" &&
     typeof value.writeRunLogsToMemory === "boolean" &&
     isNonEmptyResponseString(value.dailyLimit0G) &&

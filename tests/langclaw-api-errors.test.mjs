@@ -5,25 +5,52 @@ import {
   checkBackendHealth,
   clearAlphaWatchlist,
   createApiKey,
+  createAutomationTask,
+  createAutomationTelegramLink,
+  createWalletSession,
+  deleteAutomationTask,
   deleteAlphaWatchlistItem,
   deleteManyMemoryRecords,
+  getAutomationDashboard,
+  getAutomationSettings,
   getChatSession,
   getMemoryDashboard,
   getMemorySettings,
+  getUsageBalance,
+  getUsageQuote,
+  getUsageVaultInfo,
   LangclawApiError,
   listApiKeys,
   listAlphaWatchlist,
+  listAutomationRuns,
+  listInAppAutomationNotifications,
+  listProofDecisions,
   listChatSessions,
   listStrategyRuns,
   openStrategyPaperTrade,
+  pollAutomationTelegramLink,
   readFriendlyError,
+  requestWalletChallenge,
+  requestAutomationEmailLink,
+  requestUsageWithdraw,
   revokeApiKey,
+  runAutomationTask,
   runStrategyBacktest,
   scanStrategyPairs,
+  setAllAutomationTasksStatus,
+  setAutomationTaskStatus,
   setMemoryStatus,
+  markAllAutomationNotificationsRead,
+  markAutomationNotificationRead,
   streamChat,
   streamDiscover,
+  unlinkAutomationEmail,
+  unlinkAutomationTelegram,
+  updateAutomationTask,
+  updateAutomationSettings,
   upsertAlphaWatchlistItem,
+  verifyAutomationEmailLink,
+  verifyUsageDeposit,
 } from "../lib/langclaw-api.ts";
 
 test("successful responses reject invalid JSON bodies", async (t) => {
@@ -67,6 +94,336 @@ test("successful responses reject non-object JSON bodies", async (t) => {
     );
   }
 });
+
+test("backend health rejects malformed service status data", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { ok: "true", service: "langclaw-celo-backend" },
+    { ok: true, service: "" },
+    { ok: true },
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      checkBackendHealth(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid health data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("wallet challenge responses reject malformed signing data", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const challenge = walletChallengeRecord();
+
+  for (const invalidChallenge of [
+    { ...challenge, chainId: "42220" },
+    { ...challenge, expiresAt: "invalid" },
+    { ...challenge, purpose: "withdraw" },
+    { ...challenge, nonce: "" },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ challenge: invalidChallenge, configured: true });
+
+    await assert.rejects(
+      requestWalletChallenge({ address: challenge.address, chainId: 42220 }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid wallet challenge data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("wallet session responses reject malformed session credentials", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    signature: "0xsigned",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const session of [
+    { ...wallet, sessionExpiresAt: "2026-07-19T06:00:00.000Z", sessionToken: 42 },
+    { ...wallet, address: "invalid", sessionExpiresAt: "2026-07-19T06:00:00.000Z", sessionToken: "token" },
+    { ...wallet, sessionExpiresAt: "invalid", sessionToken: "token" },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, wallet: session });
+
+    await assert.rejects(
+      createWalletSession(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid wallet session data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("automation dashboards reject malformed task, run, and settings data", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+  const valid = automationDashboardRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { ...valid, tasks: "invalid" },
+    { ...valid, recentRuns: [{ ...valid.recentRuns[0], attempt: "1" }] },
+    { ...valid, settings: { ...valid.settings, notificationChannels: "email" } },
+    { ...valid, stats: { ...valid.stats, activeTasks: -1 } },
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      getAutomationDashboard(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid automation data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () => Response.json(valid);
+  assert.deepEqual(await getAutomationDashboard(wallet), valid);
+});
+
+test("automation task mutations reject malformed records and flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const request of [
+    () => createAutomationTask(wallet, { name: "Task" }),
+    () => updateAutomationTask(wallet, "task-1", { name: "Task" }),
+    () => setAutomationTaskStatus(wallet, "task-1", "active"),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, task: { id: "task-1" } });
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid automation data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, deleted: "false" });
+  await assert.rejects(
+    deleteAutomationTask(wallet, "task-1"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid automation data.",
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, tasks: [automationTaskRecord({ id: "" })] });
+  await assert.rejects(
+    setAllAutomationTasksStatus(wallet, "paused"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid automation data.",
+  );
+});
+
+test("automation run responses reject malformed records and collections", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, run: automationRunRecord({ status: "done" }) });
+  await assert.rejects(
+    runAutomationTask(wallet, "task-1"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid automation data.",
+  );
+
+  for (const runs of ["invalid", [automationRunRecord({ createdAt: "invalid" })]]) {
+    globalThis.fetch = async () => Response.json({ configured: true, runs });
+
+    await assert.rejects(
+      listAutomationRuns(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid automation data.",
+    );
+  }
+});
+
+test("automation settings endpoints reject malformed configuration data", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+  const invalidSettings = automationSettingsRecord({ retryPolicy: "forever" });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const request of [
+    () => getAutomationSettings(wallet),
+    () => updateAutomationSettings(wallet, { retryPolicy: "3-attempts" }),
+    () => verifyAutomationEmailLink(wallet, "123456"),
+    () => unlinkAutomationEmail(wallet),
+    () => unlinkAutomationTelegram(wallet),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, settings: invalidSettings });
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid automation data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("automation notification endpoints reject malformed delivery data", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, notifications: "invalid" });
+  await assert.rejects(
+    listInAppAutomationNotifications(wallet),
+    isInvalidAutomationError,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, notification: { id: "notification-1" } });
+  await assert.rejects(
+    markAutomationNotificationRead(wallet, "notification-1"),
+    isInvalidAutomationError,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, read: "true" });
+  await assert.rejects(
+    markAllAutomationNotificationsRead(wallet),
+    isInvalidAutomationError,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, link: { email: "test@example.com", expiresAt: "invalid", sent: true } });
+  await assert.rejects(
+    requestAutomationEmailLink(wallet, "test@example.com"),
+    isInvalidAutomationError,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, link: { botUsername: "langclaw_bot" } });
+  await assert.rejects(
+    createAutomationTelegramLink(wallet),
+    isInvalidAutomationError,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, linked: "false", status: "pending" });
+  await assert.rejects(
+    pollAutomationTelegramLink(wallet),
+    isInvalidAutomationError,
+  );
+});
+
+test("usage endpoints reject malformed balance and transaction data", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const cases = [
+    [() => getUsageBalance(wallet, "celo"), { configured: true, wallet: wallet.address, balance: "invalid" }],
+    [() => getUsageQuote("celo"), { configured: true, quote: { estimatedPromptTokens: "6000" } }],
+    [() => getUsageVaultInfo("celo"), { configured: true, vaultAddress: "invalid" }],
+    [
+      () => verifyUsageDeposit({ chain: "celo", txHash: `0x${"1".repeat(64)}`, wallet }),
+      { configured: true, credited: "true", wallet: wallet.address },
+    ],
+    [() => requestUsageWithdraw(wallet, "celo"), { configured: true, functionName: "transfer" }],
+  ];
+
+  for (const [request, payload] of cases) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("proof decision responses reject malformed chain records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const valid = proofDecisionsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { ...valid, chainId: "42220" },
+    { ...valid, decisions: "invalid" },
+    { ...valid, decisions: [{ ...valid.decisions[0], decisionHash: "0x1234" }] },
+    { ...valid, registryAddress: "invalid" },
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      listProofDecisions(20, "celo"),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid proof decision data." &&
+        error.status === 500,
+    );
+  }
+});
+
+function isInvalidAutomationError(error) {
+  return (
+    error instanceof LangclawApiError &&
+    error.message === "Backend returned invalid automation data." &&
+    error.status === 500
+  );
+}
 
 test("chat session responses reject malformed collections and records", async (t) => {
   const originalFetch = globalThis.fetch;
@@ -621,6 +978,140 @@ function chatSessionRecord(overrides = {}) {
     pinned: false,
     title: "CELO research",
     updatedAt: "2026-07-19T05:01:00.000Z",
+    ...overrides,
+  };
+}
+
+function walletChallengeRecord(overrides = {}) {
+  return {
+    address: "0x1111111111111111111111111111111111111111",
+    chainId: 42220,
+    domain: "langclawcelo.vercel.app",
+    expiresAt: "2026-07-19T05:05:00.000Z",
+    issuedAt: "2026-07-19T05:00:00.000Z",
+    message: "Sign in to Langclaw.",
+    nonce: "nonce-1",
+    purpose: "session",
+    uri: "https://langclawcelo.vercel.app",
+    ...overrides,
+  };
+}
+
+function walletSessionRecord(overrides = {}) {
+  return {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionExpiresAt: "2026-07-19T06:00:00.000Z",
+    sessionToken: "test-session",
+    ...overrides,
+  };
+}
+
+function automationTaskRecord(overrides = {}) {
+  return {
+    consecutiveFailures: 0,
+    createdAt: "2026-07-19T05:00:00.000Z",
+    displayStatus: "Active",
+    failureThreshold: 3,
+    id: "task-1",
+    maxRetries: 3,
+    metadata: {},
+    name: "Daily Celo review",
+    project: "Langclaw",
+    scheduleFrequency: "daily",
+    scheduleTime: "09:00",
+    status: "active",
+    timezone: "Asia/Jakarta",
+    triggerLabel: "Daily at 09:00",
+    triggerType: "schedule",
+    updatedAt: "2026-07-19T05:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function automationRunRecord(overrides = {}) {
+  return {
+    attempt: 1,
+    createdAt: "2026-07-19T05:00:00.000Z",
+    id: "run-1",
+    status: "completed",
+    taskId: "task-1",
+    taskName: "Daily Celo review",
+    triggeredBy: "manual",
+    ...overrides,
+  };
+}
+
+function automationNotificationRecord(overrides = {}) {
+  return {
+    body: "Daily Celo review completed.",
+    createdAt: "2026-07-19T05:00:00.000Z",
+    id: "notification-1",
+    metadata: {},
+    status: "unread",
+    title: "Automation completed",
+    ...overrides,
+  };
+}
+
+function automationSettingsRecord(overrides = {}) {
+  return {
+    autoPauseRepeatedFailures: true,
+    dailyLimit0G: "1",
+    failureNotification: "in-app",
+    limitBehavior: "pause",
+    lowBalanceThreshold0G: "0.1",
+    monthlyCap0G: "10",
+    notificationChannels: ["in-app"],
+    notificationEmailVerified: false,
+    retryPolicy: "3-attempts",
+    telegramVerified: false,
+    thresholdAction: "notify",
+    writeRunLogsToMemory: true,
+    ...overrides,
+  };
+}
+
+function automationDashboardRecord(overrides = {}) {
+  return {
+    configured: true,
+    notifications: [automationNotificationRecord()],
+    recentRuns: [automationRunRecord()],
+    settings: automationSettingsRecord(),
+    stats: {
+      activeTasks: 1,
+      completedThisWeek: 1,
+      eventTasks: 0,
+      pendingRuns: 0,
+      runningNow: 0,
+      scheduledTasks: 1,
+      successRate: 100,
+    },
+    tasks: [automationTaskRecord()],
+    ...overrides,
+  };
+}
+
+function proofDecisionsRecord(overrides = {}) {
+  return {
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    configured: true,
+    decisions: [
+      {
+        agentId: "133",
+        createdAt: "2026-07-19T05:00:00.000Z",
+        decisionHash: `0x${"1".repeat(64)}`,
+        decisionId: "0",
+        evidenceUri: "langclaw://proof/decision-0",
+        recorder: "0x2222222222222222222222222222222222222222",
+        runId: "run-1",
+        signalType: "celo-alpha",
+      },
+    ],
+    nativeSymbol: "CELO",
+    nextDecisionId: "1",
+    registryAddress: "0x1111111111111111111111111111111111111111",
     ...overrides,
   };
 }

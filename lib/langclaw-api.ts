@@ -1381,8 +1381,16 @@ export function getLangclawApiUrl(path: string) {
 
 export async function checkBackendHealth() {
   const response = await getRequest("/health");
+  const payload = await readJsonResponse<{
+    ok: boolean;
+    service: string;
+  }>(response);
 
-  return readJsonResponse<{ ok: boolean; service: string }>(response);
+  if (payload.ok !== true || !isNonEmptyResponseString(payload.service)) {
+    throw new LangclawApiError("Backend returned invalid health data.", 500);
+  }
+
+  return payload;
 }
 
 export async function requestWalletChallenge(input: {
@@ -1405,7 +1413,44 @@ export async function requestWalletChallenge(input: {
     throw new LangclawApiError("Wallet challenge was not returned.", 500);
   }
 
+  if (!isWalletChallenge(payload.challenge)) {
+    throw new LangclawApiError(
+      "Backend returned invalid wallet challenge data.",
+      500,
+    );
+  }
+
   return payload.challenge;
+}
+
+function isWalletChallenge(value: unknown): value is WalletChallenge {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const challenge = value as Record<string, unknown>;
+  const issuedAt =
+    typeof challenge.issuedAt === "string"
+      ? Date.parse(challenge.issuedAt)
+      : Number.NaN;
+  const expiresAt =
+    typeof challenge.expiresAt === "string"
+      ? Date.parse(challenge.expiresAt)
+      : Number.NaN;
+
+  return (
+    isEvmAddressResponse(challenge.address) &&
+    isPositiveResponseInteger(challenge.chainId) &&
+    isNonEmptyResponseString(challenge.domain) &&
+    Number.isFinite(issuedAt) &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > issuedAt &&
+    isNonEmptyResponseString(challenge.message) &&
+    isNonEmptyResponseString(challenge.nonce) &&
+    (challenge.purpose === "api-key:create" ||
+      challenge.purpose === "session") &&
+    isNonEmptyResponseString(challenge.uri)
+  );
 }
 
 export async function createWalletSession(wallet: WalletAuth) {
@@ -1424,7 +1469,30 @@ export async function createWalletSession(wallet: WalletAuth) {
     throw new LangclawApiError("Wallet session was not returned.", 500);
   }
 
+  if (!isWalletSession(payload.wallet)) {
+    throw new LangclawApiError(
+      "Backend returned invalid wallet session data.",
+      500,
+    );
+  }
+
   return payload.wallet;
+}
+
+function isWalletSession(value: unknown): value is WalletAuth {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const wallet = value as Record<string, unknown>;
+
+  return (
+    isEvmAddressResponse(wallet.address) &&
+    isNonEmptyResponseString(wallet.sessionToken) &&
+    isValidResponseTimestamp(wallet.sessionExpiresAt) &&
+    isOptionalResponseString(wallet.message) &&
+    isOptionalResponseString(wallet.signature)
+  );
 }
 
 export async function runDiscover(input: {
@@ -1706,6 +1774,10 @@ function isNonEmptyResponseString(value: unknown): value is string {
   return typeof value === "string" && Boolean(value.trim());
 }
 
+function isEvmAddressResponse(value: unknown) {
+  return typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
+}
+
 function isValidResponseTimestamp(value: unknown) {
   return (
     typeof value === "string" &&
@@ -1892,8 +1964,207 @@ export async function getAutomationDashboard(wallet: WalletAuth) {
     action: "list",
     wallet,
   });
+  const payload = await readAutomationResponse<AutomationDashboard>(response);
 
-  return readAutomationResponse<AutomationDashboard>(response);
+  return requireAutomationDashboard(payload);
+}
+
+function requireAutomationDashboard(value: unknown) {
+  if (!isAutomationDashboard(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function isAutomationDashboard(value: unknown): value is AutomationDashboard {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    value.configured === true &&
+    Array.isArray(value.notifications) &&
+    value.notifications.every(isAutomationNotification) &&
+    Array.isArray(value.tasks) &&
+    value.tasks.every(isAutomationTask) &&
+    Array.isArray(value.recentRuns) &&
+    value.recentRuns.every(isAutomationRun) &&
+    isAutomationSettings(value.settings) &&
+    isAutomationStats(value.stats)
+  );
+}
+
+function isAutomationTask(value: unknown): value is AutomationTask {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    isNonEmptyResponseString(value.id) &&
+    isNonEmptyResponseString(value.name) &&
+    isNonEmptyResponseString(value.project) &&
+    isOptionalResponseString(value.prompt) &&
+    isOptionalResponseString(value.model) &&
+    ["schedule", "event", "webhook"].includes(String(value.triggerType)) &&
+    (value.scheduleFrequency === undefined ||
+      ["daily", "weekly", "monthly"].includes(
+        String(value.scheduleFrequency),
+      )) &&
+    isNonEmptyResponseString(value.scheduleTime) &&
+    (value.scheduleWeekday === undefined ||
+      isBoundedResponseInteger(value.scheduleWeekday, 0, 6)) &&
+    (value.scheduleMonthDay === undefined ||
+      isBoundedResponseInteger(value.scheduleMonthDay, 1, 31)) &&
+    isNonEmptyResponseString(value.timezone) &&
+    isOptionalResponseString(value.eventName) &&
+    isOptionalResponseString(value.webhookSlug) &&
+    ["draft", "active", "paused", "archived"].includes(
+      String(value.status),
+    ) &&
+    ["Draft", "Active", "Paused", "Running"].includes(
+      String(value.displayStatus),
+    ) &&
+    isNonEmptyResponseString(value.triggerLabel) &&
+    isOptionalResponseTimestamp(value.lastRunAt) &&
+    (value.lastRunStatus === undefined ||
+      isAutomationRunStatus(value.lastRunStatus)) &&
+    isOptionalResponseTimestamp(value.nextRunAt) &&
+    isNonNegativeResponseInteger(value.consecutiveFailures) &&
+    isNonNegativeResponseInteger(value.maxRetries) &&
+    isPositiveResponseInteger(value.failureThreshold) &&
+    isValidResponseTimestamp(value.createdAt) &&
+    isValidResponseTimestamp(value.updatedAt)
+  );
+}
+
+function isAutomationRun(value: unknown): value is AutomationRun {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    isNonEmptyResponseString(value.id) &&
+    isNonEmptyResponseString(value.taskId) &&
+    isOptionalResponseString(value.taskName) &&
+    isAutomationRunStatus(value.status) &&
+    ["schedule", "event", "webhook", "manual", "system"].includes(
+      String(value.triggeredBy),
+    ) &&
+    isPositiveResponseInteger(value.attempt) &&
+    isOptionalResponseTimestamp(value.scheduledFor) &&
+    isOptionalResponseTimestamp(value.startedAt) &&
+    isOptionalResponseTimestamp(value.completedAt) &&
+    (value.durationMs === undefined ||
+      isNonNegativeResponseInteger(value.durationMs)) &&
+    isOptionalResponseString(value.error) &&
+    isValidResponseTimestamp(value.createdAt)
+  );
+}
+
+function isAutomationRunStatus(value: unknown) {
+  return [
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "skipped",
+    "canceled",
+  ].includes(String(value));
+}
+
+function isAutomationNotification(
+  value: unknown,
+): value is AutomationInAppNotification {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    isNonEmptyResponseString(value.id) &&
+    isNonEmptyResponseString(value.title) &&
+    isNonEmptyResponseString(value.body) &&
+    (value.status === "unread" || value.status === "read") &&
+    isOptionalResponseString(value.taskId) &&
+    isOptionalResponseString(value.runId) &&
+    isOptionalResponseTimestamp(value.readAt) &&
+    isValidResponseTimestamp(value.createdAt)
+  );
+}
+
+function isAutomationSettings(value: unknown): value is AutomationSettings {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    ["none", "3-attempts", "5-attempts"].includes(
+      String(value.retryPolicy),
+    ) &&
+    ["email", "in-app", "none"].includes(
+      String(value.failureNotification),
+    ) &&
+    Array.isArray(value.notificationChannels) &&
+    value.notificationChannels.every((channel) =>
+      ["email", "telegram", "in-app"].includes(String(channel)),
+    ) &&
+    isOptionalResponseString(value.notificationEmail) &&
+    isOptionalResponseTimestamp(value.notificationEmailLinkedAt) &&
+    isOptionalResponseString(value.notificationEmailPending) &&
+    typeof value.notificationEmailVerified === "boolean" &&
+    isOptionalResponseString(value.telegramChatId) &&
+    isOptionalResponseTimestamp(value.telegramLinkedAt) &&
+    isOptionalResponseString(value.telegramUsername) &&
+    typeof value.telegramVerified === "boolean" &&
+    typeof value.autoPauseRepeatedFailures === "boolean" &&
+    typeof value.writeRunLogsToMemory === "boolean" &&
+    isNonEmptyResponseString(value.dailyLimit0G) &&
+    isNonEmptyResponseString(value.monthlyCap0G) &&
+    ["pause", "alert", "allow"].includes(String(value.limitBehavior)) &&
+    isNonEmptyResponseString(value.lowBalanceThreshold0G) &&
+    ["notify", "pause", "continue"].includes(String(value.thresholdAction))
+  );
+}
+
+function isAutomationStats(value: unknown): value is AutomationStats {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    [
+      value.activeTasks,
+      value.scheduledTasks,
+      value.eventTasks,
+      value.runningNow,
+      value.pendingRuns,
+      value.completedThisWeek,
+    ].every(isNonNegativeResponseInteger) &&
+    isBoundedResponseNumber(value.successRate, 0, 100) &&
+    isOptionalResponseTimestamp(value.nextRunAt) &&
+    isOptionalResponseString(value.nextRunTaskName)
+  );
+}
+
+function isResponseObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isBoundedResponseInteger(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+) {
+  return (
+    isFiniteResponseNumber(value) &&
+    Number.isInteger(value) &&
+    value >= minimum &&
+    value <= maximum
+  );
+}
+
+function invalidAutomationResponse() {
+  return new LangclawApiError("Backend returned invalid automation data.", 500);
 }
 
 export async function createAutomationTask(
@@ -1909,7 +2180,7 @@ export async function createAutomationTask(
     response,
   );
 
-  return payload.task;
+  return requireAutomationTask(payload.task);
 }
 
 export async function updateAutomationTask(
@@ -1927,7 +2198,7 @@ export async function updateAutomationTask(
     response,
   );
 
-  return payload.task;
+  return requireAutomationTask(payload.task);
 }
 
 export async function setAutomationTaskStatus(
@@ -1944,7 +2215,7 @@ export async function setAutomationTaskStatus(
     response,
   );
 
-  return payload.task;
+  return requireAutomationTask(payload.task);
 }
 
 export async function deleteAutomationTask(
@@ -1958,7 +2229,7 @@ export async function deleteAutomationTask(
   });
   const payload = await readAutomationResponse<{ deleted?: boolean }>(response);
 
-  return Boolean(payload.deleted);
+  return requireAutomationBoolean(payload.deleted);
 }
 
 export async function setAllAutomationTasksStatus(
@@ -1973,7 +2244,31 @@ export async function setAllAutomationTasksStatus(
     response,
   );
 
-  return payload.tasks ?? [];
+  return requireAutomationTasks(payload.tasks);
+}
+
+function requireAutomationTask(value: unknown) {
+  if (!isAutomationTask(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function requireAutomationTasks(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isAutomationTask)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function requireAutomationBoolean(value: unknown) {
+  if (typeof value !== "boolean") {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
 }
 
 export async function runAutomationTask(wallet: WalletAuth, taskId: string) {
@@ -1987,7 +2282,7 @@ export async function runAutomationTask(wallet: WalletAuth, taskId: string) {
     response,
   );
 
-  return payload.run;
+  return requireAutomationRun(payload.run);
 }
 
 export async function listAutomationRuns(wallet: WalletAuth, taskId?: string) {
@@ -2000,7 +2295,23 @@ export async function listAutomationRuns(wallet: WalletAuth, taskId?: string) {
     response,
   );
 
-  return payload.runs ?? [];
+  return requireAutomationRuns(payload.runs);
+}
+
+function requireAutomationRun(value: unknown) {
+  if (!isAutomationRun(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function requireAutomationRuns(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isAutomationRun)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
 }
 
 export async function getAutomationSettings(wallet: WalletAuth) {
@@ -2012,7 +2323,7 @@ export async function getAutomationSettings(wallet: WalletAuth) {
     settings: AutomationSettings;
   }>(response);
 
-  return payload.settings;
+  return requireAutomationSettings(payload.settings);
 }
 
 export async function updateAutomationSettings(
@@ -2028,7 +2339,7 @@ export async function updateAutomationSettings(
     settings: AutomationSettings;
   }>(response);
 
-  return payload.settings;
+  return requireAutomationSettings(payload.settings);
 }
 
 export async function listInAppAutomationNotifications(
@@ -2044,7 +2355,7 @@ export async function listInAppAutomationNotifications(
     notifications: AutomationInAppNotification[];
   }>(response);
 
-  return payload.notifications ?? [];
+  return requireAutomationNotifications(payload.notifications);
 }
 
 export async function markAutomationNotificationRead(
@@ -2060,7 +2371,7 @@ export async function markAutomationNotificationRead(
     notification: AutomationInAppNotification;
   }>(response);
 
-  return payload.notification;
+  return requireAutomationNotification(payload.notification);
 }
 
 export async function markAllAutomationNotificationsRead(wallet: WalletAuth) {
@@ -2070,7 +2381,7 @@ export async function markAllAutomationNotificationsRead(wallet: WalletAuth) {
   });
   const payload = await readAutomationResponse<{ read?: boolean }>(response);
 
-  return Boolean(payload.read);
+  return requireAutomationBoolean(payload.read);
 }
 
 export async function requestAutomationEmailLink(
@@ -2083,9 +2394,20 @@ export async function requestAutomationEmailLink(
     wallet,
   });
 
-  return readAutomationResponse<{
+  const payload = await readAutomationResponse<{
     link: { email: string; expiresAt: string; sent: boolean };
   }>(response);
+
+  if (
+    !isResponseObject(payload.link) ||
+    !isNonEmptyResponseString(payload.link.email) ||
+    !isValidResponseTimestamp(payload.link.expiresAt) ||
+    typeof payload.link.sent !== "boolean"
+  ) {
+    throw invalidAutomationResponse();
+  }
+
+  return payload;
 }
 
 export async function verifyAutomationEmailLink(
@@ -2101,7 +2423,7 @@ export async function verifyAutomationEmailLink(
     settings: AutomationSettings;
   }>(response);
 
-  return payload.settings;
+  return requireAutomationSettings(payload.settings);
 }
 
 export async function unlinkAutomationEmail(wallet: WalletAuth) {
@@ -2113,7 +2435,7 @@ export async function unlinkAutomationEmail(wallet: WalletAuth) {
     settings: AutomationSettings;
   }>(response);
 
-  return payload.settings;
+  return requireAutomationSettings(payload.settings);
 }
 
 export async function createAutomationTelegramLink(wallet: WalletAuth) {
@@ -2131,7 +2453,7 @@ export async function createAutomationTelegramLink(wallet: WalletAuth) {
     };
   }>(response);
 
-  return payload.link;
+  return requireAutomationTelegramLink(payload.link);
 }
 
 export async function pollAutomationTelegramLink(wallet: WalletAuth) {
@@ -2140,11 +2462,22 @@ export async function pollAutomationTelegramLink(wallet: WalletAuth) {
     wallet,
   });
 
-  return readAutomationResponse<{
+  const payload = await readAutomationResponse<{
     linked: boolean;
     settings?: AutomationSettings;
     status: string;
   }>(response);
+
+  if (
+    typeof payload.linked !== "boolean" ||
+    !isNonEmptyResponseString(payload.status) ||
+    (payload.settings !== undefined &&
+      !isAutomationSettings(payload.settings))
+  ) {
+    throw invalidAutomationResponse();
+  }
+
+  return payload;
 }
 
 export async function unlinkAutomationTelegram(wallet: WalletAuth) {
@@ -2156,25 +2489,90 @@ export async function unlinkAutomationTelegram(wallet: WalletAuth) {
     settings: AutomationSettings;
   }>(response);
 
-  return payload.settings;
+  return requireAutomationSettings(payload.settings);
+}
+
+function requireAutomationSettings(value: unknown) {
+  if (!isAutomationSettings(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function requireAutomationNotifications(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isAutomationNotification)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function requireAutomationNotification(value: unknown) {
+  if (!isAutomationNotification(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function requireAutomationTelegramLink(value: unknown) {
+  if (!isResponseObject(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  if (
+    ![
+      value.botUsername,
+      value.code,
+      value.command,
+      value.deepLink,
+    ].every(isNonEmptyResponseString) ||
+    !isValidResponseTimestamp(value.expiresAt)
+  ) {
+    throw invalidAutomationResponse();
+  }
+
+  return value as {
+    botUsername: string;
+    code: string;
+    command: string;
+    deepLink: string;
+    expiresAt: string;
+  };
 }
 
 export async function getUsageBalance(wallet: WalletAuth, chain?: ProductChainId) {
   const response = await postJson("/api/usage/balance", { chain, wallet });
+  const payload = await readJsonResponse<UsageBalancePayload>(response);
 
-  return readJsonResponse<UsageBalancePayload>(response);
+  if (!isUsageBalancePayload(payload)) {
+    throw invalidUsageResponse();
+  }
+
+  return payload;
 }
 
 export async function getUsageQuote(chain?: ProductChainId) {
   const response = await postJson("/api/usage/quote", { chain });
+  const payload = await readJsonResponse<UsageQuotePayload>(response);
 
-  return readJsonResponse<UsageQuotePayload>(response);
+  if (payload.configured !== true || !isUsageQuote(payload.quote)) {
+    throw invalidUsageResponse();
+  }
+
+  return payload;
 }
 
 export async function getUsageVaultInfo(chain?: ProductChainId) {
   const response = await postJson("/api/usage/vault", { chain });
+  const payload = await readJsonResponse<UsageVaultInfoPayload>(response);
 
-  return readJsonResponse<UsageVaultInfoPayload>(response);
+  if (!isUsageVaultInfo(payload)) {
+    throw invalidUsageResponse();
+  }
+
+  return payload;
 }
 
 export async function verifyUsageDeposit(input: {
@@ -2184,8 +2582,13 @@ export async function verifyUsageDeposit(input: {
   wallet: WalletAuth;
 }) {
   const response = await postJson("/api/usage/deposit/verify", input);
+  const payload = await readJsonResponse<UsageDepositVerifyPayload>(response);
 
-  return readJsonResponse<UsageDepositVerifyPayload>(response);
+  if (!isUsageDeposit(payload)) {
+    throw invalidUsageResponse();
+  }
+
+  return payload;
 }
 
 export async function requestUsageWithdraw(
@@ -2193,14 +2596,238 @@ export async function requestUsageWithdraw(
   chain?: ProductChainId
 ) {
   const response = await postJson("/api/usage/withdraw/request", { chain, wallet });
+  const payload = await readJsonResponse<UsageWithdrawRequestPayload>(response);
 
-  return readJsonResponse<UsageWithdrawRequestPayload>(response);
+  if (!isUsageWithdrawRequest(payload)) {
+    throw invalidUsageResponse();
+  }
+
+  return payload;
+}
+
+function isUsageBalancePayload(value: unknown): value is UsageBalancePayload {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  const balance = value.balance;
+  const quote = value.quote;
+
+  return (
+    value.configured === true &&
+    isOptionalProductChain(value.chain) &&
+    isOptionalPositiveResponseInteger(value.chainId) &&
+    isOptionalResponseString(value.chainName) &&
+    isOptionalResponseString(value.nativeSymbol) &&
+    isEvmAddressResponse(value.wallet) &&
+    isUsageBalance(balance) &&
+    (quote === undefined || isUsageQuote(quote)) &&
+    (!isResponseObject(balance) ||
+      value.chain === undefined ||
+      balance.chain === undefined ||
+      value.chain === balance.chain) &&
+    (!isResponseObject(balance) ||
+      value.chainId === undefined ||
+      balance.chainId === undefined ||
+      value.chainId === balance.chainId)
+  );
+}
+
+function isUsageBalance(value: unknown): value is UsageBalance {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    isOptionalProductChain(value.chain) &&
+    isOptionalPositiveResponseInteger(value.chainId) &&
+    isOptionalResponseString(value.nativeSymbol) &&
+    [
+      value.availableNeuron,
+      value.available0G,
+      value.reservedNeuron,
+      value.reserved0G,
+      value.lifetimeDepositedNeuron,
+      value.lifetimeDeposited0G,
+      value.lifetimeChargedNeuron,
+      value.lifetimeCharged0G,
+    ].every(isNonEmptyResponseString) &&
+    [
+      value.availableNative,
+      value.reservedNative,
+      value.lifetimeDepositedNative,
+      value.lifetimeChargedNative,
+    ].every(isOptionalResponseString)
+  );
+}
+
+function isUsageQuote(value: unknown): value is UsageQuote {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    isOptionalProductChain(value.chain) &&
+    isOptionalPositiveResponseInteger(value.chainId) &&
+    isOptionalResponseString(value.chainName) &&
+    isOptionalResponseString(value.nativeSymbol) &&
+    isNonEmptyResponseString(value.model) &&
+    isNonEmptyResponseString(value.endpoint) &&
+    isNonEmptyResponseString(value.promptPriceNeuron) &&
+    isNonEmptyResponseString(value.completionPriceNeuron) &&
+    isOptionalResponseString(value.imagePriceNeuron) &&
+    isOptionalResponseString(value.promptPriceUsd) &&
+    isOptionalResponseString(value.completionPriceUsd) &&
+    isOptionalResponseString(value.imagePriceUsd) &&
+    isNonNegativeResponseInteger(value.estimatedPromptTokens) &&
+    isNonNegativeResponseInteger(value.estimatedCompletionTokens) &&
+    isNonEmptyResponseString(value.estimatedCostNeuron) &&
+    isNonEmptyResponseString(value.estimatedCost0G) &&
+    isOptionalResponseString(value.estimatedCostNative) &&
+    isValidResponseTimestamp(value.priceFetchedAt)
+  );
+}
+
+function isUsageVaultInfo(value: unknown): value is UsageVaultInfoPayload {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    value.configured === true &&
+    isOptionalProductChain(value.chain) &&
+    isOptionalPositiveResponseInteger(value.chainId) &&
+    isOptionalResponseString(value.chainName) &&
+    isOptionalResponseString(value.nativeSymbol) &&
+    (value.billingCurrency === undefined ||
+      isUsageBillingCurrency(value.billingCurrency)) &&
+    (value.depositFunctionName === undefined ||
+      value.depositFunctionName === "deposit" ||
+      value.depositFunctionName === "depositTokenAmount") &&
+    isEvmAddressResponse(value.vaultAddress)
+  );
+}
+
+function isUsageBillingCurrency(value: unknown) {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    isNonNegativeResponseInteger(value.decimals) &&
+    isNonEmptyResponseString(value.name) &&
+    isNonEmptyResponseString(value.symbol) &&
+    (value.feeCurrencyAddress === undefined ||
+      isEvmAddressResponse(value.feeCurrencyAddress)) &&
+    (value.tokenAddress === undefined ||
+      isEvmAddressResponse(value.tokenAddress))
+  );
+}
+
+function isUsageDeposit(value: unknown): value is UsageDepositVerifyPayload {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    value.configured === true &&
+    isOptionalProductChain(value.chain) &&
+    isOptionalPositiveResponseInteger(value.chainId) &&
+    isOptionalResponseString(value.chainName) &&
+    isOptionalResponseString(value.nativeSymbol) &&
+    isEvmAddressResponse(value.wallet) &&
+    (value.walletSession === undefined || isWalletSession(value.walletSession)) &&
+    isTransactionHashResponse(value.txHash) &&
+    isNonEmptyResponseString(value.amountNeuron) &&
+    isNonEmptyResponseString(value.amount0G) &&
+    isOptionalResponseString(value.amountNative) &&
+    typeof value.credited === "boolean" &&
+    isNonEmptyResponseString(value.balanceBefore) &&
+    isNonEmptyResponseString(value.balanceAfter)
+  );
+}
+
+function isUsageWithdrawRequest(
+  value: unknown,
+): value is UsageWithdrawRequestPayload {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  const request = value as Record<string, unknown>;
+
+  return (
+    isUsageVaultInfo(value) &&
+    isEvmAddressResponse(request.wallet) &&
+    request.functionName === "withdraw" &&
+    isUsageBalance(request.balance) &&
+    isNonEmptyResponseString(request.note)
+  );
+}
+
+function isTransactionHashResponse(value: unknown) {
+  return typeof value === "string" && /^0x[a-fA-F0-9]{64}$/.test(value);
+}
+
+function invalidUsageResponse() {
+  return new LangclawApiError("Backend returned invalid usage data.", 500);
 }
 
 export async function listProofDecisions(limit = 20, chain?: ProductChainId) {
   const response = await postJson("/api/proofs/decisions", { chain, limit });
+  const payload = await readJsonResponse<ProofDecisionsPayload>(response);
 
-  return readJsonResponse<ProofDecisionsPayload>(response);
+  if (!isProofDecisionsPayload(payload)) {
+    throw new LangclawApiError(
+      "Backend returned invalid proof decision data.",
+      500,
+    );
+  }
+
+  return payload;
+}
+
+function isProofDecisionsPayload(
+  value: unknown,
+): value is ProofDecisionsPayload {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    value.configured === true &&
+    isOptionalProductChain(value.chain) &&
+    isPositiveResponseInteger(value.chainId) &&
+    isOptionalResponseString(value.chainName) &&
+    isOptionalResponseString(value.nativeSymbol) &&
+    Array.isArray(value.decisions) &&
+    value.decisions.every(isProofDecision) &&
+    isUnsignedIntegerString(value.nextDecisionId) &&
+    isEvmAddressResponse(value.registryAddress)
+  );
+}
+
+function isProofDecision(value: unknown): value is ProofDecision {
+  if (!isResponseObject(value)) {
+    return false;
+  }
+
+  return (
+    isUnsignedIntegerString(value.agentId) &&
+    isValidResponseTimestamp(value.createdAt) &&
+    isTransactionHashResponse(value.decisionHash) &&
+    isUnsignedIntegerString(value.decisionId) &&
+    isNonEmptyResponseString(value.evidenceUri) &&
+    isOptionalResponseString(value.explorerUrl) &&
+    isEvmAddressResponse(value.recorder) &&
+    isNonEmptyResponseString(value.runId) &&
+    isNonEmptyResponseString(value.signalType) &&
+    (value.txHash === undefined || isTransactionHashResponse(value.txHash))
+  );
+}
+
+function isUnsignedIntegerString(value: unknown) {
+  return typeof value === "string" && /^(0|[1-9]\d*)$/.test(value);
 }
 
 export async function runStrategyBacktest(input: {

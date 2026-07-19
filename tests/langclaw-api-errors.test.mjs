@@ -486,6 +486,26 @@ test("automation tasks require metadata for their trigger type", async (t) => {
   }
 });
 
+test("automation tasks reject reversed timestamps", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const task = automationTaskRecord({
+    createdAt: "2026-07-19T05:01:00.000Z",
+    updatedAt: "2026-07-19T05:00:00.000Z",
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json(automationDashboardRecord({ tasks: [task] }));
+
+  await assert.rejects(
+    getAutomationDashboard(walletSessionRecord()),
+    isInvalidAutomationError,
+  );
+});
+
 test("automation task mutations reject malformed records and flags", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

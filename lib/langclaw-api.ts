@@ -2035,6 +2035,9 @@ function isAutomationTask(value: unknown): value is AutomationTask {
     return false;
   }
 
+  const createdAt = value.createdAt;
+  const updatedAt = value.updatedAt;
+
   return (
     isNonEmptyResponseString(value.id) &&
     isNonEmptyResponseString(value.name) &&
@@ -2072,8 +2075,9 @@ function isAutomationTask(value: unknown): value is AutomationTask {
     isNonNegativeResponseInteger(value.consecutiveFailures) &&
     isNonNegativeResponseInteger(value.maxRetries) &&
     isPositiveResponseInteger(value.failureThreshold) &&
-    isValidResponseTimestamp(value.createdAt) &&
-    isValidResponseTimestamp(value.updatedAt)
+    isValidResponseTimestamp(createdAt) &&
+    isValidResponseTimestamp(updatedAt) &&
+    Date.parse(updatedAt) >= Date.parse(createdAt)
   );
 }
 

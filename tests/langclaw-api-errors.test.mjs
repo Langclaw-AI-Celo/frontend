@@ -972,6 +972,32 @@ test("automation email links reject expired responses", async (t) => {
   );
 });
 
+test("automation Telegram links reject expired responses", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      link: {
+        botUsername: "langclaw_bot",
+        code: "ABC123",
+        command: "/link ABC123",
+        deepLink: "https://t.me/langclaw_bot?start=ABC123",
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      },
+    });
+
+  await assert.rejects(
+    createAutomationTelegramLink(wallet),
+    isInvalidAutomationError,
+  );
+});
+
 test("automation notifications reject inconsistent read state", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

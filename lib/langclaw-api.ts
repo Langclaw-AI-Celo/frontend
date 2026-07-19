@@ -2677,7 +2677,7 @@ function requireAutomationTelegramLink(value: unknown) {
       value.command,
       value.deepLink,
     ].every(isNonEmptyResponseString) ||
-    !isValidResponseTimestamp(value.expiresAt)
+    !isFutureResponseTimestamp(value.expiresAt)
   ) {
     throw invalidAutomationResponse();
   }

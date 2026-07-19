@@ -1469,7 +1469,30 @@ export async function createWalletSession(wallet: WalletAuth) {
     throw new LangclawApiError("Wallet session was not returned.", 500);
   }
 
+  if (!isWalletSession(payload.wallet)) {
+    throw new LangclawApiError(
+      "Backend returned invalid wallet session data.",
+      500,
+    );
+  }
+
   return payload.wallet;
+}
+
+function isWalletSession(value: unknown): value is WalletAuth {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const wallet = value as Record<string, unknown>;
+
+  return (
+    isEvmAddressResponse(wallet.address) &&
+    isNonEmptyResponseString(wallet.sessionToken) &&
+    isValidResponseTimestamp(wallet.sessionExpiresAt) &&
+    isOptionalResponseString(wallet.message) &&
+    isOptionalResponseString(wallet.signature)
+  );
 }
 
 export async function runDiscover(input: {

@@ -5,6 +5,7 @@ import {
   checkBackendHealth,
   clearAlphaWatchlist,
   createApiKey,
+  createWalletSession,
   deleteAlphaWatchlistItem,
   deleteManyMemoryRecords,
   getChatSession,
@@ -116,6 +117,35 @@ test("wallet challenge responses reject malformed signing data", async (t) => {
       (error) =>
         error instanceof LangclawApiError &&
         error.message === "Backend returned invalid wallet challenge data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("wallet session responses reject malformed session credentials", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    signature: "0xsigned",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const session of [
+    { ...wallet, sessionExpiresAt: "2026-07-19T06:00:00.000Z", sessionToken: 42 },
+    { ...wallet, address: "invalid", sessionExpiresAt: "2026-07-19T06:00:00.000Z", sessionToken: "token" },
+    { ...wallet, sessionExpiresAt: "invalid", sessionToken: "token" },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, wallet: session });
+
+    await assert.rejects(
+      createWalletSession(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid wallet session data." &&
         error.status === 500,
     );
   }

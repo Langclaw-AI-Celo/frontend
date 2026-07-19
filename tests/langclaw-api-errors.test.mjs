@@ -30,6 +30,26 @@ test("successful responses reject invalid JSON bodies", async (t) => {
   );
 });
 
+test("successful responses reject non-object JSON bodies", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const body of [null, [], "invalid"]) {
+    globalThis.fetch = async () => Response.json(body);
+
+    await assert.rejects(
+      checkBackendHealth(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned an unexpected JSON response." &&
+        error.status === 200,
+    );
+  }
+});
+
 test("streaming responses reject malformed NDJSON chunks", async (t) => {
   const originalFetch = globalThis.fetch;
 

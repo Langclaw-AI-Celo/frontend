@@ -2531,6 +2531,13 @@ async function readJsonResponse<T>(response: Response) {
     );
   }
 
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new LangclawApiError(
+      "Backend returned an unexpected JSON response.",
+      response.status,
+    );
+  }
+
   return payload as T;
 }
 

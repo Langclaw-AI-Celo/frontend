@@ -1594,7 +1594,7 @@ export async function streamChat(input: ChatStreamInput) {
 export async function listChatSessions(wallet: WalletAuth) {
   const response = await chatSessionsRequest({ action: "list", wallet });
 
-  return response.sessions ?? [];
+  return requireChatSessions(response.sessions);
 }
 
 export async function getChatSession(wallet: WalletAuth, sessionId: string) {
@@ -1604,7 +1604,7 @@ export async function getChatSession(wallet: WalletAuth, sessionId: string) {
     wallet,
   });
 
-  return response.session ?? null;
+  return readOptionalChatSession(response.session);
 }
 
 export async function upsertChatSession(
@@ -1617,7 +1617,7 @@ export async function upsertChatSession(
     wallet,
   });
 
-  return response.session ?? null;
+  return readOptionalChatSession(response.session);
 }
 
 export async function deleteChatSession(wallet: WalletAuth, sessionId: string) {
@@ -1646,20 +1646,95 @@ export async function updateChatSessionMetadata(
     wallet,
   });
 
-  return response.session ?? null;
+  return readOptionalChatSession(response.session);
+}
+
+function requireChatSessions(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isChatSession)) {
+    throw invalidChatSessionResponse();
+  }
+
+  return value as ChatSession[];
+}
+
+function readOptionalChatSession(value: unknown) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (!isChatSession(value)) {
+    throw invalidChatSessionResponse();
+  }
+
+  return value as ChatSession;
+}
+
+function isChatSession(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const session = value as Record<string, unknown>;
+
+  return (
+    isNonEmptyResponseString(session.id) &&
+    isNonEmptyResponseString(session.title) &&
+    isValidResponseTimestamp(session.createdAt) &&
+    isValidResponseTimestamp(session.updatedAt) &&
+    (session.pinned === undefined || typeof session.pinned === "boolean") &&
+    Array.isArray(session.messages) &&
+    session.messages.every(isStoredChatMessage)
+  );
+}
+
+function isStoredChatMessage(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const message = value as Record<string, unknown>;
+
+  return (
+    isNonEmptyResponseString(message.id) &&
+    (message.role === "assistant" || message.role === "user") &&
+    typeof message.content === "string" &&
+    (message.stopped === undefined || typeof message.stopped === "boolean")
+  );
+}
+
+function isNonEmptyResponseString(value: unknown): value is string {
+  return typeof value === "string" && Boolean(value.trim());
+}
+
+function isValidResponseTimestamp(value: unknown) {
+  return (
+    typeof value === "string" &&
+    Boolean(value.trim()) &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+
+function invalidChatSessionResponse() {
+  return new LangclawApiError(
+    "Backend returned invalid chat session data.",
+    500,
+  );
 }
 
 export async function listApiKeys(wallet: WalletAuth) {
   const response = await apiKeysRequest({ action: "list", wallet });
 
-  return response.keys ?? [];
+  return requireApiKeys(response.keys);
 }
 
 export async function createApiKey(wallet: WalletAuth, name: string) {
   const response = await apiKeysRequest({ action: "create", name, wallet });
 
-  if (!response.key || !response.secret) {
-    throw new LangclawApiError("API key was not returned.", 500);
+  if (
+    !isApiKeyRecord(response.key) ||
+    !isNonEmptyResponseString(response.secret)
+  ) {
+    throw invalidApiKeyResponse();
   }
 
   return {
@@ -1672,21 +1747,65 @@ export async function createApiKey(wallet: WalletAuth, name: string) {
 export async function revokeApiKey(wallet: WalletAuth, keyId: string) {
   const response = await apiKeysRequest({ action: "revoke", keyId, wallet });
 
-  if (!response.key) {
-    throw new LangclawApiError("API key was not returned.", 500);
+  if (!isApiKeyRecord(response.key)) {
+    throw invalidApiKeyResponse();
   }
 
   return response.key;
 }
 
+function requireApiKeys(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isApiKeyRecord)) {
+    throw invalidApiKeyResponse();
+  }
+
+  return value as ApiKeyRecord[];
+}
+
+function isApiKeyRecord(value: unknown): value is ApiKeyRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const key = value as Record<string, unknown>;
+
+  return (
+    isNonEmptyResponseString(key.id) &&
+    isNonEmptyResponseString(key.name) &&
+    isNonEmptyResponseString(key.maskedKey) &&
+    isNonEmptyResponseString(key.status) &&
+    isValidResponseTimestamp(key.createdAt) &&
+    isOptionalResponseString(key.prefix) &&
+    isOptionalResponseString(key.suffix) &&
+    isOptionalResponseTimestamp(key.lastUsedAt) &&
+    isOptionalResponseTimestamp(key.revokedAt)
+  );
+}
+
+function isOptionalResponseString(value: unknown) {
+  return value === undefined || isNonEmptyResponseString(value);
+}
+
+function isOptionalResponseTimestamp(value: unknown) {
+  return value === undefined || isValidResponseTimestamp(value);
+}
+
+function invalidApiKeyResponse() {
+  return new LangclawApiError("Backend returned invalid API key data.", 500);
+}
+
 export async function getMemoryDashboard(wallet: WalletAuth) {
   const response = await memoryRequest({ action: "list", wallet });
+  const memories = requireMemoryItems(response.memories);
 
   return {
     configured: true,
-    memories: response.memories ?? [],
+    memories,
     settings: requireMemorySettings(response.settings),
-    stats: response.stats ?? buildMemoryStats(response.memories ?? []),
+    stats:
+      response.stats === undefined
+        ? buildMemoryStats(memories)
+        : requireMemoryStats(response.stats),
   } satisfies MemoryDashboard;
 }
 
@@ -1702,11 +1821,7 @@ export async function setMemoryStatus(
     wallet,
   });
 
-  if (!response.memory) {
-    throw new LangclawApiError("Memory was not returned.", 500);
-  }
-
-  return response.memory;
+  return requireMemoryItem(response.memory);
 }
 
 export async function setManyMemoryStatuses(
@@ -1721,7 +1836,7 @@ export async function setManyMemoryStatuses(
     wallet,
   });
 
-  return response.memories ?? [];
+  return requireMemoryItems(response.memories);
 }
 
 export async function deleteMemoryRecord(
@@ -1734,7 +1849,10 @@ export async function deleteMemoryRecord(
     wallet,
   });
 
-  return response.deletedIds ?? (response.deleted ? [memoryId] : []);
+  return readDeletedMemoryIds(
+    response.deletedIds,
+    response.deleted ? [memoryId] : [],
+  );
 }
 
 export async function deleteManyMemoryRecords(
@@ -1747,7 +1865,7 @@ export async function deleteManyMemoryRecords(
     wallet,
   });
 
-  return response.deletedIds ?? [];
+  return readDeletedMemoryIds(response.deletedIds, []);
 }
 
 export async function getMemorySettings(wallet: WalletAuth) {
@@ -2093,7 +2211,218 @@ export async function runStrategyBacktest(input: {
   const response = await postJson("/api/strategy/backtest", input);
   const payload = await readJsonResponse<StrategyBacktestResponse>(response);
 
+  if (!isStrategyBacktest(payload.backtest)) {
+    throw new LangclawApiError(
+      "Backend returned invalid strategy backtest data.",
+      500,
+    );
+  }
+
   return payload.backtest;
+}
+
+function isStrategyBacktest(value: unknown): value is StrategyBacktestPayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const backtest = value as Record<string, unknown>;
+
+  return (
+    Array.isArray(backtest.bars) &&
+    backtest.bars.every(isStrategyMarketBar) &&
+    isOptionalProductChain(backtest.chain) &&
+    isOptionalPositiveResponseInteger(backtest.chainId) &&
+    isOptionalResponseString(backtest.chainName) &&
+    Array.isArray(backtest.equityCurve) &&
+    backtest.equityCurve.every(isStrategyEquityPoint) &&
+    isValidResponseTimestamp(backtest.generatedAt) &&
+    isStrategySignal(backtest.latestSignal) &&
+    isNonEmptyResponseString(backtest.market) &&
+    isStrategyMetrics(backtest.metrics) &&
+    isNonEmptyResponseString(backtest.pairAddress) &&
+    isStrategyParams(backtest.params) &&
+    isNonEmptyResponseString(backtest.queryId) &&
+    isNonEmptyResponseString(backtest.runId) &&
+    isNonEmptyResponseString(backtest.sourceUrl) &&
+    isNonEmptyResponseString(backtest.strategyId) &&
+    isNonEmptyResponseString(backtest.title) &&
+    Array.isArray(backtest.trades) &&
+    backtest.trades.every(isStrategyTrade) &&
+    (backtest.proof === undefined || isTradingJournalProof(backtest.proof))
+  );
+}
+
+function isStrategyMarketBar(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const bar = value as Record<string, unknown>;
+
+  return (
+    isNonNegativeResponseNumber(bar.liquidityUsd) &&
+    isOptionalFiniteResponseNumber(bar.netWhaleFlowUsd) &&
+    isNonEmptyResponseString(bar.pairAddress) &&
+    isPositiveResponseNumber(bar.priceUsd) &&
+    isValidResponseTimestamp(bar.timestamp) &&
+    isOptionalNonNegativeResponseInteger(bar.txCount) &&
+    isNonNegativeResponseNumber(bar.volumeUsd)
+  );
+}
+
+function isStrategyEquityPoint(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const point = value as Record<string, unknown>;
+
+  return (
+    isNonNegativeResponseNumber(point.equityUsd) &&
+    isValidResponseTimestamp(point.timestamp)
+  );
+}
+
+function isStrategySignal(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const signal = value as Record<string, unknown>;
+
+  return (
+    ["buy", "sell", "hold", "exit"].includes(String(signal.action)) &&
+    isBoundedResponseNumber(signal.confidence, 0, 100) &&
+    isNonNegativeResponseNumber(signal.liquidityUsd) &&
+    isFiniteResponseNumber(signal.momentumBps) &&
+    isPositiveResponseNumber(signal.priceUsd) &&
+    isNonEmptyResponseString(signal.rationale) &&
+    isNonNegativeResponseNumber(signal.volumeUsd)
+  );
+}
+
+function isStrategyMetrics(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const metrics = value as Record<string, unknown>;
+
+  return (
+    isNonNegativeResponseNumber(metrics.finalEquityUsd) &&
+    isPositiveResponseNumber(metrics.initialCapitalUsd) &&
+    isNonNegativeResponseNumber(metrics.maxDrawdownBps) &&
+    isFiniteResponseNumber(metrics.totalPnlBps) &&
+    isFiniteResponseNumber(metrics.totalPnlUsd) &&
+    isNonNegativeResponseInteger(metrics.tradeCount) &&
+    isBoundedResponseNumber(metrics.winRate, 0, 100)
+  );
+}
+
+function isStrategyParams(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const params = value as Record<string, unknown>;
+
+  return [
+    params.initialCapitalUsd,
+    params.maxHoldHours,
+    params.minLiquidityUsd,
+    params.minMomentumBps,
+    params.minVolumeMultiple,
+    params.stopLossBps,
+    params.takeProfitBps,
+  ].every(isPositiveResponseNumber);
+}
+
+function isStrategyTrade(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const trade = value as Record<string, unknown>;
+
+  return (
+    isValidResponseTimestamp(trade.entryAt) &&
+    isPositiveResponseNumber(trade.entryPriceUsd) &&
+    isValidResponseTimestamp(trade.exitAt) &&
+    isPositiveResponseNumber(trade.exitPriceUsd) &&
+    isNonNegativeResponseNumber(trade.holdHours) &&
+    isFiniteResponseNumber(trade.pnlBps) &&
+    isFiniteResponseNumber(trade.pnlUsd) &&
+    isNonEmptyResponseString(trade.reason)
+  );
+}
+
+function isTradingJournalProof(value: unknown): value is TradingJournalProof {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const proof = value as Record<string, unknown>;
+
+  return (
+    ["buy", "sell", "hold", "exit"].includes(String(proof.action)) &&
+    isNonEmptyResponseString(proof.agentId) &&
+    isOptionalProductChain(proof.chain) &&
+    isPositiveResponseInteger(proof.chainId) &&
+    isOptionalResponseString(proof.chainName) &&
+    isNonEmptyResponseString(proof.decisionHash) &&
+    isNonEmptyResponseString(proof.evidenceUri) &&
+    isFiniteResponseNumber(proof.pnlBps) &&
+    isNonEmptyResponseString(proof.resultHash) &&
+    ["anchored", "failed", "pending", "prepared"].includes(
+      String(proof.status),
+    ) &&
+    ["backtested", "paper-opened", "paper-closed"].includes(
+      String(proof.strategyStatus),
+    )
+  );
+}
+
+function isOptionalProductChain(value: unknown) {
+  return value === undefined || value === "celo" || value === "mantle";
+}
+
+function isFiniteResponseNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isPositiveResponseNumber(value: unknown) {
+  return isFiniteResponseNumber(value) && value > 0;
+}
+
+function isNonNegativeResponseNumber(value: unknown) {
+  return isFiniteResponseNumber(value) && value >= 0;
+}
+
+function isPositiveResponseInteger(value: unknown) {
+  return isPositiveResponseNumber(value) && Number.isInteger(value);
+}
+
+function isOptionalPositiveResponseInteger(value: unknown) {
+  return value === undefined || isPositiveResponseInteger(value);
+}
+
+function isOptionalFiniteResponseNumber(value: unknown) {
+  return value === undefined || isFiniteResponseNumber(value);
+}
+
+function isOptionalNonNegativeResponseInteger(value: unknown) {
+  return value === undefined || isNonNegativeResponseInteger(value);
+}
+
+function isBoundedResponseNumber(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+) {
+  return (
+    isFiniteResponseNumber(value) && value >= minimum && value <= maximum
+  );
 }
 
 export async function scanStrategyPairs(input: {
@@ -2104,7 +2433,57 @@ export async function scanStrategyPairs(input: {
   const response = await postJson("/api/strategy/scan-pairs", input);
   const payload = await readJsonResponse<StrategyScanResponse>(response);
 
+  if (!isStrategyScan(payload.scan)) {
+    throw new LangclawApiError(
+      "Backend returned invalid strategy scan data.",
+      500,
+    );
+  }
+
   return payload.scan;
+}
+
+function isStrategyScan(value: unknown): value is StrategyScanPayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const scan = value as Record<string, unknown>;
+
+  return (
+    isStrategyBacktest(scan.bestBacktest) &&
+    isOptionalProductChain(scan.chain) &&
+    isOptionalPositiveResponseInteger(scan.chainId) &&
+    isOptionalResponseString(scan.chainName) &&
+    Array.isArray(scan.candidates) &&
+    scan.candidates.every(isStrategyScanCandidate) &&
+    isValidResponseTimestamp(scan.generatedAt) &&
+    isNonEmptyResponseString(scan.queryId) &&
+    isNonNegativeResponseInteger(scan.scannedPairs) &&
+    isNonEmptyResponseString(scan.selectedPairAddress) &&
+    isNonEmptyResponseString(scan.sourceUrl)
+  );
+}
+
+function isStrategyScanCandidate(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+
+  return (
+    isStrategySignal(candidate.latestSignal) &&
+    isValidResponseTimestamp(candidate.latestTimestamp) &&
+    isNonEmptyResponseString(candidate.market) &&
+    isStrategyMetrics(candidate.metrics) &&
+    isNonEmptyResponseString(candidate.pairAddress) &&
+    isPositiveResponseInteger(candidate.rank) &&
+    isNonNegativeResponseInteger(candidate.rowCount) &&
+    isFiniteResponseNumber(candidate.score) &&
+    isNonEmptyResponseString(candidate.scoreReason) &&
+    isNonNegativeResponseNumber(candidate.totalVolumeUsd)
+  );
 }
 
 export async function openStrategyPaperTrade(input: {
@@ -2115,13 +2494,118 @@ export async function openStrategyPaperTrade(input: {
   const response = await postJson("/api/strategy/paper-trade", input);
   const payload = await readJsonResponse<StrategyPaperTradeResponse>(response);
 
+  if (!isStrategyPaperTrade(payload.paperTrade)) {
+    throw new LangclawApiError(
+      "Backend returned invalid strategy paper trade data.",
+      500,
+    );
+  }
+
   return payload.paperTrade;
+}
+
+function isStrategyPaperTrade(
+  value: unknown,
+): value is StrategyPaperTradePayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const paperTrade = value as Record<string, unknown>;
+  const proof =
+    paperTrade.proof &&
+    typeof paperTrade.proof === "object" &&
+    !Array.isArray(paperTrade.proof)
+      ? (paperTrade.proof as Record<string, unknown>)
+      : undefined;
+
+  return (
+    ["buy", "sell", "hold", "exit"].includes(String(paperTrade.action)) &&
+    isOptionalProductChain(paperTrade.chain) &&
+    isOptionalPositiveResponseInteger(paperTrade.chainId) &&
+    isOptionalResponseString(paperTrade.chainName) &&
+    isBoundedResponseNumber(paperTrade.confidence, 0, 100) &&
+    isValidResponseTimestamp(paperTrade.generatedAt) &&
+    isNonEmptyResponseString(paperTrade.market) &&
+    isPositiveResponseNumber(paperTrade.notionalUsd) &&
+    isNonEmptyResponseString(paperTrade.pairAddress) &&
+    proof !== undefined &&
+    isTradingJournalProof(proof) &&
+    isNonEmptyResponseString(paperTrade.rationale) &&
+    isNonEmptyResponseString(paperTrade.referenceBacktestRunId) &&
+    isNonEmptyResponseString(paperTrade.runId) &&
+    isNonEmptyResponseString(paperTrade.strategyId) &&
+    proof?.action === paperTrade.action &&
+    (paperTrade.chain === undefined ||
+      proof.chain === undefined ||
+      proof.chain === paperTrade.chain) &&
+    (paperTrade.chainId === undefined || proof.chainId === paperTrade.chainId)
+  );
 }
 
 export async function listStrategyRuns(limit = 25, chain?: ProductChainId) {
   const response = await postJson("/api/strategy/runs", { chain, limit });
+  const payload = await readJsonResponse<StrategyRunsPayload>(response);
 
-  return readJsonResponse<StrategyRunsPayload>(response);
+  if (!isStrategyRuns(payload)) {
+    throw new LangclawApiError(
+      "Backend returned invalid strategy run data.",
+      500,
+    );
+  }
+
+  return payload;
+}
+
+function isStrategyRuns(value: unknown): value is StrategyRunsPayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const runs = value as Record<string, unknown>;
+
+  return (
+    isOptionalProductChain(runs.chain) &&
+    isPositiveResponseInteger(runs.chainId) &&
+    isOptionalResponseString(runs.chainName) &&
+    typeof runs.configured === "boolean" &&
+    isOptionalResponseString(runs.error) &&
+    isOptionalResponseString(runs.journalAddress) &&
+    isNonEmptyResponseString(runs.nextRecordId) &&
+    Array.isArray(runs.records) &&
+    runs.records.every(isStrategyRunRecord)
+  );
+}
+
+function isStrategyRunRecord(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return (
+    ["buy", "sell", "hold", "exit"].includes(String(record.action)) &&
+    isNonEmptyResponseString(record.agentId) &&
+    isOptionalProductChain(record.chain) &&
+    isOptionalPositiveResponseInteger(record.chainId) &&
+    isOptionalResponseString(record.chainName) &&
+    isValidResponseTimestamp(record.createdAt) &&
+    isNonEmptyResponseString(record.decisionHash) &&
+    isNonEmptyResponseString(record.evidenceUri) &&
+    isOptionalResponseString(record.explorerUrl) &&
+    isNonEmptyResponseString(record.market) &&
+    isFiniteResponseNumber(record.pnlBps) &&
+    isNonEmptyResponseString(record.recordId) &&
+    isNonEmptyResponseString(record.recorder) &&
+    isNonEmptyResponseString(record.resultHash) &&
+    isNonEmptyResponseString(record.runId) &&
+    ["backtested", "paper-opened", "paper-closed"].includes(
+      String(record.status),
+    ) &&
+    isNonEmptyResponseString(record.strategyId) &&
+    isOptionalResponseString(record.txHash)
+  );
 }
 
 export async function listAlphaWatchlist(wallet: WalletAuth) {
@@ -2131,7 +2615,7 @@ export async function listAlphaWatchlist(wallet: WalletAuth) {
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
-  return payload.items ?? [];
+  return requireWatchlistItems(payload.items);
 }
 
 export async function upsertAlphaWatchlistItem(
@@ -2145,8 +2629,8 @@ export async function upsertAlphaWatchlistItem(
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
-  if (!payload.item) {
-    throw new LangclawApiError("Watchlist item was not returned.", 500);
+  if (!isWatchlistItem(payload.item)) {
+    throw invalidWatchlistResponse();
   }
 
   return payload.item;
@@ -2163,7 +2647,7 @@ export async function deleteAlphaWatchlistItem(
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
-  return Boolean(payload.deleted);
+  return readWatchlistMutationFlag(payload.deleted);
 }
 
 export async function clearAlphaWatchlist(wallet: WalletAuth) {
@@ -2173,7 +2657,66 @@ export async function clearAlphaWatchlist(wallet: WalletAuth) {
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
-  return Boolean(payload.cleared);
+  return readWatchlistMutationFlag(payload.cleared);
+}
+
+function requireWatchlistItems(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isWatchlistItem)) {
+    throw invalidWatchlistResponse();
+  }
+
+  return value as AlphaWatchlistItem[];
+}
+
+function isWatchlistItem(value: unknown): value is AlphaWatchlistItem {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const item = value as Record<string, unknown>;
+
+  return (
+    isValidResponseTimestamp(item.addedAt) &&
+    isNonEmptyResponseString(item.caveat) &&
+    isNonEmptyResponseString(item.chain) &&
+    isNonNegativeResponseInteger(item.gapCount) &&
+    isNonEmptyResponseString(item.id) &&
+    isNonEmptyResponseString(item.intent) &&
+    isNonEmptyResponseString(item.recommendation) &&
+    isNonEmptyResponseString(item.signalType) &&
+    isNonNegativeResponseInteger(item.sourceCount) &&
+    isNonEmptyResponseString(item.subject) &&
+    isNonEmptyResponseString(item.summary) &&
+    isNonEmptyResponseString(item.title) &&
+    [
+      item.agentId,
+      item.decisionHash,
+      item.decisionId,
+      item.evidenceUri,
+      item.explorerUrl,
+      item.proofTx,
+    ].every(isOptionalResponseString)
+  );
+}
+
+function isNonNegativeResponseInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function readWatchlistMutationFlag(value: unknown) {
+  if (value === undefined) {
+    return false;
+  }
+
+  if (typeof value !== "boolean") {
+    throw invalidWatchlistResponse();
+  }
+
+  return value;
+}
+
+function invalidWatchlistResponse() {
+  return new LangclawApiError("Backend returned invalid watchlist data.", 500);
 }
 
 export function dispatchChatSessionsUpdated() {
@@ -2288,12 +2831,101 @@ async function readAutomationResponse<T>(response: Response) {
   return payload as T;
 }
 
-function requireMemorySettings(settings?: MemorySettings) {
-  if (!settings) {
-    throw new LangclawApiError("Memory settings were not returned.", 500);
+function requireMemoryItems(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isMemoryItem)) {
+    throw invalidMemoryResponse();
   }
 
-  return settings;
+  return value as MemoryItem[];
+}
+
+function requireMemoryItem(value: unknown) {
+  if (!isMemoryItem(value)) {
+    throw invalidMemoryResponse();
+  }
+
+  return value;
+}
+
+function isMemoryItem(value: unknown): value is MemoryItem {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const memory = value as Record<string, unknown>;
+
+  return (
+    isNonEmptyResponseString(memory.id) &&
+    isNonEmptyResponseString(memory.memory) &&
+    ["Preference", "Project", "Workflow", "Personal", "API"].includes(
+      String(memory.category),
+    ) &&
+    isNonEmptyResponseString(memory.scope) &&
+    (memory.status === "active" || memory.status === "disabled") &&
+    isNonEmptyResponseString(memory.source) &&
+    isValidResponseTimestamp(memory.lastUsed) &&
+    isValidResponseTimestamp(memory.updatedAt) &&
+    typeof memory.confidence === "number" &&
+    Number.isFinite(memory.confidence) &&
+    memory.confidence >= 0 &&
+    memory.confidence <= 100
+  );
+}
+
+function requireMemorySettings(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw invalidMemoryResponse();
+  }
+
+  const settings = value as Record<string, unknown>;
+
+  if (
+    typeof settings.autoDisableLowConfidence !== "boolean" ||
+    typeof settings.captureEnabled !== "boolean" ||
+    typeof settings.crossChatRecall !== "boolean" ||
+    typeof settings.projectScopedRecall !== "boolean" ||
+    !Number.isInteger(settings.retentionDays) ||
+    (settings.retentionDays as number) < 0 ||
+    !isValidResponseTimestamp(settings.updatedAt)
+  ) {
+    throw invalidMemoryResponse();
+  }
+
+  return value as MemorySettings;
+}
+
+function requireMemoryStats(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw invalidMemoryResponse();
+  }
+
+  const stats = value as Record<string, unknown>;
+
+  if (
+    ![stats.active, stats.disabled, stats.projectScoped, stats.total].every(
+      (entry) => typeof entry === "number" && Number.isInteger(entry) && entry >= 0,
+    )
+  ) {
+    throw invalidMemoryResponse();
+  }
+
+  return value as MemoryStats;
+}
+
+function readDeletedMemoryIds(value: unknown, fallback: string[]) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (!Array.isArray(value) || !value.every(isNonEmptyResponseString)) {
+    throw invalidMemoryResponse();
+  }
+
+  return value as string[];
+}
+
+function invalidMemoryResponse() {
+  return new LangclawApiError("Backend returned invalid memory data.", 500);
 }
 
 function buildMemoryStats(memories: MemoryItem[]): MemoryStats {

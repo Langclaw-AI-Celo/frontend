@@ -3,10 +3,27 @@ import test from "node:test";
 
 import {
   checkBackendHealth,
+  clearAlphaWatchlist,
+  createApiKey,
+  deleteAlphaWatchlistItem,
+  deleteManyMemoryRecords,
+  getChatSession,
+  getMemoryDashboard,
+  getMemorySettings,
   LangclawApiError,
+  listApiKeys,
+  listAlphaWatchlist,
+  listChatSessions,
+  listStrategyRuns,
+  openStrategyPaperTrade,
   readFriendlyError,
+  revokeApiKey,
+  runStrategyBacktest,
+  scanStrategyPairs,
+  setMemoryStatus,
   streamChat,
   streamDiscover,
+  upsertAlphaWatchlistItem,
 } from "../lib/langclaw-api.ts";
 
 test("successful responses reject invalid JSON bodies", async (t) => {
@@ -49,6 +66,357 @@ test("successful responses reject non-object JSON bodies", async (t) => {
         error.status === 200,
     );
   }
+});
+
+test("chat session responses reject malformed collections and records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionToken: "test-session",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const sessions of [
+    "invalid",
+    [null],
+    [chatSessionRecord({ messages: "invalid" })],
+    [
+      chatSessionRecord({
+        messages: [{ content: "hello", id: "m1", role: "tool" }],
+      }),
+    ],
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, sessions });
+
+    await assert.rejects(
+      listChatSessions(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid chat session data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      session: chatSessionRecord({ updatedAt: "not-a-date" }),
+    });
+
+  await assert.rejects(
+    getChatSession(wallet, "session-1"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid chat session data." &&
+      error.status === 500,
+  );
+});
+
+test("API key responses reject malformed collections and records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionToken: "test-session",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const keys of [
+    "invalid",
+    [null],
+    [apiKeyRecord({ createdAt: "invalid" })],
+  ]) {
+    globalThis.fetch = async () => Response.json({ configured: true, keys });
+
+    await assert.rejects(
+      listApiKeys(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid API key data." &&
+        error.status === 500,
+    );
+  }
+
+  for (const request of [
+    () => createApiKey(wallet, "Research key"),
+    () => revokeApiKey(wallet, "key-1"),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, key: "invalid", secret: 123 });
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid API key data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("memory responses reject malformed records, settings, stats, and IDs", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionToken: "test-session",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { memories: "invalid", settings: memorySettings() },
+    {
+      memories: [memoryRecord({ confidence: 101 })],
+      settings: memorySettings(),
+    },
+    { memories: [], settings: "invalid" },
+    { memories: [], settings: memorySettings(), stats: { total: "0" } },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, ...payload });
+
+    await assert.rejects(
+      getMemoryDashboard(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid memory data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, memory: { id: "memory-1" } });
+  await assert.rejects(
+    setMemoryStatus(wallet, "memory-1", "disabled"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid memory data." &&
+      error.status === 500,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, settings: [] });
+  await assert.rejects(
+    getMemorySettings(wallet),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid memory data." &&
+      error.status === 500,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, deletedIds: "memory-1" });
+  await assert.rejects(
+    deleteManyMemoryRecords(wallet, ["memory-1"]),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid memory data." &&
+      error.status === 500,
+  );
+});
+
+test("watchlist responses reject malformed items and mutation flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionToken: "test-session",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const items of ["invalid", [null], [watchlistRecord({ sourceCount: -1 })]]) {
+    globalThis.fetch = async () => Response.json({ configured: true, items });
+
+    await assert.rejects(
+      listAlphaWatchlist(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid watchlist data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, item: "invalid" });
+  await assert.rejects(
+    upsertAlphaWatchlistItem(wallet, watchlistRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid watchlist data." &&
+      error.status === 500,
+  );
+
+  for (const [request, responseBody] of [
+    [() => deleteAlphaWatchlistItem(wallet, "watch-1"), { deleted: "false" }],
+    [() => clearAlphaWatchlist(wallet), { cleared: 1 }],
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, ...responseBody });
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid watchlist data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("strategy backtests reject malformed response records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const valid = strategyBacktestRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const backtest of [
+    undefined,
+    "invalid",
+    { ...valid, bars: "invalid" },
+    {
+      ...valid,
+      latestSignal: { ...valid.latestSignal, action: "transfer" },
+    },
+    { ...valid, metrics: { ...valid.metrics, tradeCount: "0" } },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, backtest });
+
+    await assert.rejects(
+      runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid strategy backtest data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, backtest: valid });
+  assert.deepEqual(
+    await runStrategyBacktest({ chain: "celo", queryId: "123" }),
+    valid,
+  );
+});
+
+test("strategy pair scans reject malformed response records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const valid = strategyScanRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const scan of [
+    undefined,
+    "invalid",
+    { ...valid, bestBacktest: {} },
+    { ...valid, candidates: "invalid" },
+    {
+      ...valid,
+      candidates: [{ ...valid.candidates[0], rank: "1" }],
+    },
+  ]) {
+    globalThis.fetch = async () => Response.json({ configured: true, scan });
+
+    await assert.rejects(
+      scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid strategy scan data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () => Response.json({ configured: true, scan: valid });
+  assert.deepEqual(
+    await scanStrategyPairs({ chain: "celo", queryId: "123" }),
+    valid,
+  );
+});
+
+test("strategy paper trades reject malformed response records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const valid = strategyPaperTradeRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const paperTrade of [
+    undefined,
+    "invalid",
+    { ...valid, action: "transfer" },
+    { ...valid, notionalUsd: "1000" },
+    { ...valid, proof: { status: "anchored" } },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, paperTrade });
+
+    await assert.rejects(
+      openStrategyPaperTrade({ backtest, chain: "celo", notionalUsd: 1_000 }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid strategy paper trade data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, paperTrade: valid });
+  assert.deepEqual(
+    await openStrategyPaperTrade({
+      backtest,
+      chain: "celo",
+      notionalUsd: 1_000,
+    }),
+    valid,
+  );
+});
+
+test("strategy run history rejects malformed response records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const valid = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { ...valid, chainId: "42220" },
+    { ...valid, nextRecordId: 1 },
+    { ...valid, records: "invalid" },
+    {
+      ...valid,
+      records: [{ ...valid.records[0], status: "unknown" }],
+    },
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      listStrategyRuns(25, "celo"),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid strategy run data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () => Response.json(valid);
+  assert.deepEqual(await listStrategyRuns(25, "celo"), valid);
 });
 
 test("streaming responses reject malformed NDJSON chunks", async (t) => {
@@ -244,6 +612,232 @@ test("insufficient balance errors keep the currency reported by the backend", ()
     );
   }
 });
+
+function chatSessionRecord(overrides = {}) {
+  return {
+    createdAt: "2026-07-19T05:00:00.000Z",
+    id: "session-1",
+    messages: [],
+    pinned: false,
+    title: "CELO research",
+    updatedAt: "2026-07-19T05:01:00.000Z",
+    ...overrides,
+  };
+}
+
+function apiKeyRecord(overrides = {}) {
+  return {
+    createdAt: "2026-07-19T05:00:00.000Z",
+    id: "key-1",
+    maskedKey: "lc_live_••••1234",
+    name: "Research key",
+    status: "active",
+    ...overrides,
+  };
+}
+
+function memoryRecord(overrides = {}) {
+  return {
+    category: "Project",
+    confidence: 90,
+    id: "memory-1",
+    lastUsed: "2026-07-19",
+    memory: "Prefer Celo for this project.",
+    scope: "Langclaw",
+    source: "Chat",
+    status: "active",
+    updatedAt: "2026-07-19",
+    ...overrides,
+  };
+}
+
+function memorySettings(overrides = {}) {
+  return {
+    autoDisableLowConfidence: true,
+    captureEnabled: true,
+    crossChatRecall: true,
+    projectScopedRecall: true,
+    retentionDays: 365,
+    updatedAt: "2026-07-19T05:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function watchlistRecord(overrides = {}) {
+  return {
+    addedAt: "2026-07-19T05:00:00.000Z",
+    caveat: "Market conditions can change.",
+    chain: "celo",
+    gapCount: 0,
+    id: "watch-1",
+    intent: "research",
+    recommendation: "Review the supporting sources.",
+    signalType: "smart-money",
+    sourceCount: 3,
+    subject: "CELO",
+    summary: "Verified on-chain activity increased.",
+    title: "CELO activity",
+    ...overrides,
+  };
+}
+
+function strategyBacktestRecord(overrides = {}) {
+  const pairAddress = "0xeAfc4D6d4c3391Cd4Fc10c85D2f5f972d58C0dD5";
+
+  return {
+    bars: [
+      {
+        liquidityUsd: 100_000,
+        pairAddress,
+        priceUsd: 1.02,
+        timestamp: "2026-07-19T05:00:00.000Z",
+        volumeUsd: 25_000,
+      },
+    ],
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    equityCurve: [
+      { equityUsd: 10_000, timestamp: "2026-07-19T05:00:00.000Z" },
+    ],
+    generatedAt: "2026-07-19T05:01:00.000Z",
+    latestSignal: {
+      action: "hold",
+      confidence: 65,
+      liquidityUsd: 100_000,
+      momentumBps: 20,
+      priceUsd: 1.02,
+      rationale: "Momentum remains below the entry threshold.",
+      volumeUsd: 25_000,
+    },
+    market: `celo:${pairAddress}`,
+    metrics: {
+      finalEquityUsd: 10_000,
+      initialCapitalUsd: 10_000,
+      maxDrawdownBps: 0,
+      totalPnlBps: 0,
+      totalPnlUsd: 0,
+      tradeCount: 0,
+      winRate: 0,
+    },
+    pairAddress,
+    params: {
+      initialCapitalUsd: 10_000,
+      maxHoldHours: 24,
+      minLiquidityUsd: 50_000,
+      minMomentumBps: 50,
+      minVolumeMultiple: 1.1,
+      stopLossBps: 500,
+      takeProfitBps: 1_000,
+    },
+    queryId: "123",
+    runId: "bt-test",
+    sourceUrl: "https://api.dune.com/api/v1/query/123/results",
+    strategyId: "celo-liquidity-momentum-v1",
+    title: "Celo Liquidity Momentum Strategy",
+    trades: [],
+    ...overrides,
+  };
+}
+
+function strategyScanRecord(overrides = {}) {
+  const bestBacktest = strategyBacktestRecord();
+
+  return {
+    bestBacktest,
+    candidates: [
+      {
+        latestSignal: bestBacktest.latestSignal,
+        latestTimestamp: "2026-07-19T05:00:00.000Z",
+        market: bestBacktest.market,
+        metrics: bestBacktest.metrics,
+        pairAddress: bestBacktest.pairAddress,
+        rank: 1,
+        rowCount: 12,
+        score: 150,
+        scoreReason: "0 trades / +0 bps PnL / HOLD latest signal",
+        totalVolumeUsd: 300_000,
+      },
+    ],
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    generatedAt: "2026-07-19T05:01:00.000Z",
+    queryId: "123",
+    scannedPairs: 1,
+    selectedPairAddress: bestBacktest.pairAddress,
+    sourceUrl: "https://api.dune.com/api/v1/query/123/results",
+    ...overrides,
+  };
+}
+
+function strategyPaperTradeRecord(overrides = {}) {
+  const pairAddress = "0xeAfc4D6d4c3391Cd4Fc10c85D2f5f972d58C0dD5";
+
+  return {
+    action: "hold",
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    confidence: 65,
+    generatedAt: "2026-07-19T05:02:00.000Z",
+    market: `celo:${pairAddress}`,
+    notionalUsd: 1_000,
+    pairAddress,
+    proof: {
+      action: "hold",
+      agentId: "133",
+      chain: "celo",
+      chainId: 42220,
+      chainName: "Celo",
+      decisionHash: `0x${"1".repeat(64)}`,
+      evidenceUri: "langclaw://strategy/paper-test",
+      pnlBps: 0,
+      resultHash: `0x${"2".repeat(64)}`,
+      status: "prepared",
+      strategyStatus: "paper-opened",
+    },
+    rationale: "Momentum remains below the entry threshold.",
+    referenceBacktestRunId: "bt-test",
+    runId: "paper-test",
+    strategyId: "celo-liquidity-momentum-v1",
+    ...overrides,
+  };
+}
+
+function strategyRunsRecord(overrides = {}) {
+  const pairAddress = "0xeAfc4D6d4c3391Cd4Fc10c85D2f5f972d58C0dD5";
+
+  return {
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    configured: true,
+    journalAddress: "0x1111111111111111111111111111111111111111",
+    nextRecordId: "1",
+    records: [
+      {
+        action: "hold",
+        agentId: "133",
+        chain: "celo",
+        chainId: 42220,
+        chainName: "Celo",
+        createdAt: "2026-07-19T05:02:00.000Z",
+        decisionHash: `0x${"1".repeat(64)}`,
+        evidenceUri: "langclaw://strategy/paper-test",
+        market: `celo:${pairAddress}`,
+        pnlBps: 0,
+        recordId: "0",
+        recorder: "0x2222222222222222222222222222222222222222",
+        resultHash: `0x${"2".repeat(64)}`,
+        runId: "paper-test",
+        status: "paper-opened",
+        strategyId: "celo-liquidity-momentum-v1",
+      },
+    ],
+    ...overrides,
+  };
+}
 
 test("payment errors without a currency use neutral credit guidance", () => {
   const message = readFriendlyError(

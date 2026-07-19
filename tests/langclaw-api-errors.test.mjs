@@ -24,6 +24,7 @@ import {
   listAlphaWatchlist,
   listAutomationRuns,
   listInAppAutomationNotifications,
+  listProofDecisions,
   listChatSessions,
   listStrategyRuns,
   openStrategyPaperTrade,
@@ -385,6 +386,32 @@ test("usage endpoints reject malformed balance and transaction data", async (t) 
       (error) =>
         error instanceof LangclawApiError &&
         error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("proof decision responses reject malformed chain records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const valid = proofDecisionsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { ...valid, chainId: "42220" },
+    { ...valid, decisions: "invalid" },
+    { ...valid, decisions: [{ ...valid.decisions[0], decisionHash: "0x1234" }] },
+    { ...valid, registryAddress: "invalid" },
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      listProofDecisions(20, "celo"),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid proof decision data." &&
         error.status === 500,
     );
   }
@@ -1060,6 +1087,31 @@ function automationDashboardRecord(overrides = {}) {
       successRate: 100,
     },
     tasks: [automationTaskRecord()],
+    ...overrides,
+  };
+}
+
+function proofDecisionsRecord(overrides = {}) {
+  return {
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    configured: true,
+    decisions: [
+      {
+        agentId: "133",
+        createdAt: "2026-07-19T05:00:00.000Z",
+        decisionHash: `0x${"1".repeat(64)}`,
+        decisionId: "0",
+        evidenceUri: "langclaw://proof/decision-0",
+        recorder: "0x2222222222222222222222222222222222222222",
+        runId: "run-1",
+        signalType: "celo-alpha",
+      },
+    ],
+    nativeSymbol: "CELO",
+    nextDecisionId: "1",
+    registryAddress: "0x1111111111111111111111111111111111111111",
     ...overrides,
   };
 }

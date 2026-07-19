@@ -613,7 +613,7 @@ export type ApiKeyRecord = {
   prefix?: string;
   suffix?: string;
   maskedKey: string;
-  status: "active" | "revoked" | (string & {});
+  status: "active" | "revoked";
   createdAt: string;
   lastUsedAt?: string;
   revokedAt?: string;
@@ -1450,6 +1450,7 @@ function isWalletChallenge(value: unknown): value is WalletChallenge {
     Number.isFinite(issuedAt) &&
     Number.isFinite(expiresAt) &&
     expiresAt > issuedAt &&
+    expiresAt > Date.now() &&
     isNonEmptyResponseString(challenge.message) &&
     isNonEmptyResponseString(challenge.nonce) &&
     (challenge.purpose === "api-key:create" ||
@@ -1497,7 +1498,7 @@ function isWalletSession(value: unknown): value is WalletAuth {
   return (
     isEvmAddressResponse(wallet.address) &&
     isNonEmptyResponseString(wallet.sessionToken) &&
-    isValidResponseTimestamp(wallet.sessionExpiresAt) &&
+    isFutureResponseTimestamp(wallet.sessionExpiresAt) &&
     isOptionalResponseString(wallet.message) &&
     isOptionalResponseString(wallet.signature)
   );
@@ -1755,12 +1756,15 @@ function isChatSession(value: unknown) {
   }
 
   const session = value as Record<string, unknown>;
+  const createdAt = session.createdAt;
+  const updatedAt = session.updatedAt;
 
   return (
     isNonEmptyResponseString(session.id) &&
     isNonEmptyResponseString(session.title) &&
-    isValidResponseTimestamp(session.createdAt) &&
-    isValidResponseTimestamp(session.updatedAt) &&
+    isValidResponseTimestamp(createdAt) &&
+    isValidResponseTimestamp(updatedAt) &&
+    Date.parse(updatedAt) >= Date.parse(createdAt) &&
     (session.pinned === undefined || typeof session.pinned === "boolean") &&
     Array.isArray(session.messages) &&
     session.messages.every(isStoredChatMessage)
@@ -1790,12 +1794,16 @@ function isEvmAddressResponse(value: unknown) {
   return typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
 }
 
-function isValidResponseTimestamp(value: unknown) {
+function isValidResponseTimestamp(value: unknown): value is string {
   return (
     typeof value === "string" &&
     Boolean(value.trim()) &&
     Number.isFinite(Date.parse(value))
   );
+}
+
+function isFutureResponseTimestamp(value: unknown) {
+  return isValidResponseTimestamp(value) && Date.parse(value) > Date.now();
 }
 
 function invalidChatSessionResponse() {
@@ -1852,17 +1860,20 @@ function isApiKeyRecord(value: unknown): value is ApiKeyRecord {
   }
 
   const key = value as Record<string, unknown>;
+  const createdAt = key.createdAt;
 
   return (
     isNonEmptyResponseString(key.id) &&
     isNonEmptyResponseString(key.name) &&
     isNonEmptyResponseString(key.maskedKey) &&
-    isNonEmptyResponseString(key.status) &&
-    isValidResponseTimestamp(key.createdAt) &&
+    (key.status === "active" || key.status === "revoked") &&
+    isValidResponseTimestamp(createdAt) &&
     isOptionalResponseString(key.prefix) &&
     isOptionalResponseString(key.suffix) &&
-    isOptionalResponseTimestamp(key.lastUsedAt) &&
-    isOptionalResponseTimestamp(key.revokedAt)
+    isOptionalResponseTimestampAtOrAfter(key.lastUsedAt, createdAt) &&
+    ((key.status === "active" && key.revokedAt === undefined) ||
+      (key.status === "revoked" && isValidResponseTimestamp(key.revokedAt))) &&
+    isOptionalResponseTimestampAtOrAfter(key.revokedAt, createdAt)
   );
 }
 
@@ -1872,6 +1883,17 @@ function isOptionalResponseString(value: unknown) {
 
 function isOptionalResponseTimestamp(value: unknown) {
   return value === undefined || isValidResponseTimestamp(value);
+}
+
+function isOptionalResponseTimestampAtOrAfter(
+  value: unknown,
+  earliest: string,
+) {
+  return (
+    value === undefined ||
+    (isValidResponseTimestamp(value) &&
+      Date.parse(value) >= Date.parse(earliest))
+  );
 }
 
 function invalidApiKeyResponse() {
@@ -2031,6 +2053,10 @@ function isAutomationTask(value: unknown): value is AutomationTask {
     isNonEmptyResponseString(value.timezone) &&
     isOptionalResponseString(value.eventName) &&
     isOptionalResponseString(value.webhookSlug) &&
+    (value.triggerType !== "event" ||
+      isNonEmptyResponseString(value.eventName)) &&
+    (value.triggerType !== "webhook" ||
+      isNonEmptyResponseString(value.webhookSlug)) &&
     ["draft", "active", "paused", "archived"].includes(
       String(value.status),
     ) &&
@@ -2055,6 +2081,9 @@ function isAutomationRun(value: unknown): value is AutomationRun {
     return false;
   }
 
+  const createdAt = value.createdAt;
+  const startedAt = value.startedAt;
+
   return (
     isNonEmptyResponseString(value.id) &&
     isNonEmptyResponseString(value.taskId) &&
@@ -2065,12 +2094,15 @@ function isAutomationRun(value: unknown): value is AutomationRun {
     ) &&
     isPositiveResponseInteger(value.attempt) &&
     isOptionalResponseTimestamp(value.scheduledFor) &&
-    isOptionalResponseTimestamp(value.startedAt) &&
-    isOptionalResponseTimestamp(value.completedAt) &&
+    isValidResponseTimestamp(createdAt) &&
+    isOptionalResponseTimestampAtOrAfter(startedAt, createdAt) &&
+    isOptionalResponseTimestampAtOrAfter(
+      value.completedAt,
+      typeof startedAt === "string" ? startedAt : createdAt,
+    ) &&
     (value.durationMs === undefined ||
       isNonNegativeResponseInteger(value.durationMs)) &&
-    isOptionalResponseString(value.error) &&
-    isValidResponseTimestamp(value.createdAt)
+    isOptionalResponseString(value.error)
   );
 }
 
@@ -2092,6 +2124,8 @@ function isAutomationNotification(
     return false;
   }
 
+  const createdAt = value.createdAt;
+
   return (
     isNonEmptyResponseString(value.id) &&
     isNonEmptyResponseString(value.title) &&
@@ -2099,8 +2133,10 @@ function isAutomationNotification(
     (value.status === "unread" || value.status === "read") &&
     isOptionalResponseString(value.taskId) &&
     isOptionalResponseString(value.runId) &&
-    isOptionalResponseTimestamp(value.readAt) &&
-    isValidResponseTimestamp(value.createdAt)
+    isValidResponseTimestamp(createdAt) &&
+    ((value.status === "unread" && value.readAt === undefined) ||
+      (value.status === "read" && isValidResponseTimestamp(value.readAt))) &&
+    isOptionalResponseTimestampAtOrAfter(value.readAt, createdAt)
   );
 }
 

@@ -259,6 +259,33 @@ test("wallet challenge responses reject malformed signing data", async (t) => {
   }
 });
 
+test("wallet challenge responses reject expired challenges", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const challenge = walletChallengeRecord({
+    expiresAt: "2026-07-19T05:05:00.000Z",
+    issuedAt: "2026-07-19T05:00:00.000Z",
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ challenge, configured: true });
+
+  await assert.rejects(
+    requestWalletChallenge({
+      address: challenge.address,
+      chainId: challenge.chainId,
+      purpose: challenge.purpose,
+    }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid wallet challenge data." &&
+      error.status === 500,
+  );
+});
+
 test("wallet challenges must match the requested account and purpose", async (t) => {
   const originalFetch = globalThis.fetch;
   const challenge = walletChallengeRecord();
@@ -319,6 +346,34 @@ test("wallet session responses reject malformed session credentials", async (t) 
   }
 });
 
+test("wallet session responses reject expired credentials", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    signature: "0xsigned",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      wallet: walletSessionRecord({
+        sessionExpiresAt: "2026-07-19T06:00:00.000Z",
+      }),
+    });
+
+  await assert.rejects(
+    createWalletSession(wallet),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid wallet session data." &&
+      error.status === 500,
+  );
+});
+
 test("wallet sessions must match the authenticated account", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {
@@ -376,6 +431,31 @@ test("automation dashboards reject malformed task, run, and settings data", asyn
 
   globalThis.fetch = async () => Response.json(valid);
   assert.deepEqual(await getAutomationDashboard(wallet), valid);
+});
+
+test("automation tasks require metadata for their trigger type", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const task of [
+    automationTaskRecord({ eventName: undefined, triggerType: "event" }),
+    automationTaskRecord({ triggerType: "webhook", webhookSlug: undefined }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json(automationDashboardRecord({ tasks: [task] }));
+
+    await assert.rejects(
+      getAutomationDashboard(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid automation data." &&
+        error.status === 500,
+    );
+  }
 });
 
 test("automation task mutations reject malformed records and flags", async (t) => {
@@ -447,6 +527,38 @@ test("automation run responses reject malformed records and collections", async 
       (error) =>
         error instanceof LangclawApiError &&
         error.message === "Backend returned invalid automation data.",
+    );
+  }
+});
+
+test("automation run responses reject reversed timestamps", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const run of [
+    automationRunRecord({
+      createdAt: "2026-07-19T05:01:00.000Z",
+      startedAt: "2026-07-19T05:00:00.000Z",
+    }),
+    automationRunRecord({
+      completedAt: "2026-07-19T05:01:00.000Z",
+      createdAt: "2026-07-19T05:00:00.000Z",
+      startedAt: "2026-07-19T05:02:00.000Z",
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, runs: [run] });
+
+    await assert.rejects(
+      listAutomationRuns(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid automation data." &&
+        error.status === 500,
     );
   }
 });
@@ -527,6 +639,56 @@ test("automation notification endpoints reject malformed delivery data", async (
     Response.json({ configured: true, linked: "false", status: "pending" });
   await assert.rejects(
     pollAutomationTelegramLink(wallet),
+    isInvalidAutomationError,
+  );
+});
+
+test("automation notifications reject inconsistent read state", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const notification of [
+    automationNotificationRecord({
+      readAt: "2026-07-19T05:01:00.000Z",
+      status: "unread",
+    }),
+    automationNotificationRecord({ status: "read" }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, notifications: [notification] });
+
+    await assert.rejects(
+      listInAppAutomationNotifications(wallet),
+      isInvalidAutomationError,
+    );
+  }
+});
+
+test("automation notifications reject reads before creation", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      notifications: [
+        automationNotificationRecord({
+          readAt: "2026-07-19T04:59:00.000Z",
+          status: "read",
+        }),
+      ],
+    });
+
+  await assert.rejects(
+    listInAppAutomationNotifications(wallet),
     isInvalidAutomationError,
   );
 });
@@ -645,6 +807,33 @@ test("chat session responses reject malformed collections and records", async (t
   );
 });
 
+test("chat session responses reject reversed timestamps", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      sessions: [
+        chatSessionRecord({
+          createdAt: "2026-07-19T05:02:00.000Z",
+          updatedAt: "2026-07-19T05:01:00.000Z",
+        }),
+      ],
+    });
+
+  await assert.rejects(
+    listChatSessions(walletSessionRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid chat session data." &&
+      error.status === 500,
+  );
+});
+
 test("API key responses reject malformed collections and records", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {
@@ -681,6 +870,82 @@ test("API key responses reject malformed collections and records", async (t) => 
 
     await assert.rejects(
       request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid API key data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("API key responses reject unsupported statuses", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      keys: [apiKeyRecord({ status: "suspended" })],
+    });
+
+  await assert.rejects(
+    listApiKeys(walletSessionRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid API key data." &&
+      error.status === 500,
+  );
+});
+
+test("API key responses reject inconsistent revocation state", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const key of [
+    apiKeyRecord({
+      revokedAt: "2026-07-19T05:01:00.000Z",
+      status: "active",
+    }),
+    apiKeyRecord({ status: "revoked" }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, keys: [key] });
+
+    await assert.rejects(
+      listApiKeys(walletSessionRecord()),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid API key data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("API key responses reject timestamps before creation", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const key of [
+    apiKeyRecord({ lastUsedAt: "2026-07-19T04:59:00.000Z" }),
+    apiKeyRecord({
+      revokedAt: "2026-07-19T04:59:00.000Z",
+      status: "revoked",
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, keys: [key] });
+
+    await assert.rejects(
+      listApiKeys(walletSessionRecord()),
       (error) =>
         error instanceof LangclawApiError &&
         error.message === "Backend returned invalid API key data." &&
@@ -1257,12 +1522,14 @@ function chatSessionRecord(overrides = {}) {
 }
 
 function walletChallengeRecord(overrides = {}) {
+  const now = Date.now();
+
   return {
     address: "0x1111111111111111111111111111111111111111",
     chainId: 42220,
     domain: "langclawcelo.vercel.app",
-    expiresAt: "2026-07-19T05:05:00.000Z",
-    issuedAt: "2026-07-19T05:00:00.000Z",
+    expiresAt: new Date(now + 4 * 60 * 1000).toISOString(),
+    issuedAt: new Date(now - 60 * 1000).toISOString(),
     message: "Sign in to Langclaw.",
     nonce: "nonce-1",
     purpose: "session",
@@ -1274,7 +1541,7 @@ function walletChallengeRecord(overrides = {}) {
 function walletSessionRecord(overrides = {}) {
   return {
     address: "0x1111111111111111111111111111111111111111",
-    sessionExpiresAt: "2026-07-19T06:00:00.000Z",
+    sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     sessionToken: "test-session",
     ...overrides,
   };

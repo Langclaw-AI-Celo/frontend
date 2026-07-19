@@ -2081,6 +2081,9 @@ function isAutomationRun(value: unknown): value is AutomationRun {
     return false;
   }
 
+  const createdAt = value.createdAt;
+  const startedAt = value.startedAt;
+
   return (
     isNonEmptyResponseString(value.id) &&
     isNonEmptyResponseString(value.taskId) &&
@@ -2091,12 +2094,15 @@ function isAutomationRun(value: unknown): value is AutomationRun {
     ) &&
     isPositiveResponseInteger(value.attempt) &&
     isOptionalResponseTimestamp(value.scheduledFor) &&
-    isOptionalResponseTimestamp(value.startedAt) &&
-    isOptionalResponseTimestamp(value.completedAt) &&
+    isValidResponseTimestamp(createdAt) &&
+    isOptionalResponseTimestampAtOrAfter(startedAt, createdAt) &&
+    isOptionalResponseTimestampAtOrAfter(
+      value.completedAt,
+      typeof startedAt === "string" ? startedAt : createdAt,
+    ) &&
     (value.durationMs === undefined ||
       isNonNegativeResponseInteger(value.durationMs)) &&
-    isOptionalResponseString(value.error) &&
-    isValidResponseTimestamp(value.createdAt)
+    isOptionalResponseString(value.error)
   );
 }
 

@@ -531,6 +531,38 @@ test("automation run responses reject malformed records and collections", async 
   }
 });
 
+test("automation run responses reject reversed timestamps", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const run of [
+    automationRunRecord({
+      createdAt: "2026-07-19T05:01:00.000Z",
+      startedAt: "2026-07-19T05:00:00.000Z",
+    }),
+    automationRunRecord({
+      completedAt: "2026-07-19T05:01:00.000Z",
+      createdAt: "2026-07-19T05:00:00.000Z",
+      startedAt: "2026-07-19T05:02:00.000Z",
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, runs: [run] });
+
+    await assert.rejects(
+      listAutomationRuns(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid automation data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("automation settings endpoints reject malformed configuration data", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

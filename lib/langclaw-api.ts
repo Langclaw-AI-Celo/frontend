@@ -1499,14 +1499,14 @@ export async function streamChat(input: ChatStreamInput) {
 
   await readNdjson<ChatStreamChunk>(response, (chunk) => {
     if (chunk.type === "direct_delta") {
-      input.onDirectDelta?.(typeof chunk.delta === "string" ? chunk.delta : "");
+      const delta = readStreamString(chunk.delta, response.status);
+      input.onDirectDelta?.(delta);
       return;
     }
 
     if (chunk.type === "direct_reasoning_delta") {
-      input.onDirectReasoningDelta?.(
-        typeof chunk.delta === "string" ? chunk.delta : "",
-      );
+      const delta = readStreamString(chunk.delta, response.status);
+      input.onDirectReasoningDelta?.(delta);
       return;
     }
 
@@ -1520,7 +1520,8 @@ export async function streamChat(input: ChatStreamInput) {
     }
 
     if (chunk.type === "mode") {
-      input.onMode?.(typeof chunk.mode === "string" ? chunk.mode : "");
+      const mode = readStreamString(chunk.mode, response.status, true);
+      input.onMode?.(mode);
       return;
     }
 
@@ -2664,6 +2665,24 @@ function readStreamObject<T>(value: unknown, status: number) {
   }
 
   return value as T;
+}
+
+function readStreamString(
+  value: unknown,
+  status: number,
+  requireContent = false,
+) {
+  if (
+    typeof value !== "string" ||
+    (requireContent && value.trim().length === 0)
+  ) {
+    throw new LangclawApiError(
+      "Backend returned an unexpected streaming response.",
+      status,
+    );
+  }
+
+  return value;
 }
 
 function normalizeError(value: unknown) {

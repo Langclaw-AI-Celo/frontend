@@ -202,6 +202,35 @@ test("streams reject malformed object event payloads", async (t) => {
   }
 });
 
+test("chat streams reject malformed scalar event payloads", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const body of [
+    '{"type":"direct_delta","delta":42}\n',
+    '{"type":"direct_reasoning_delta"}\n',
+    '{"type":"mode","mode":{}}\n',
+    '{"type":"mode","mode":" "}\n',
+  ]) {
+    globalThis.fetch = async () =>
+      new Response(body, {
+        headers: { "Content-Type": "application/x-ndjson" },
+        status: 200,
+      });
+
+    await assert.rejects(
+      streamChat({ message: "Check CELO" }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned an unexpected streaming response." &&
+        error.status === 200,
+    );
+  }
+});
+
 test("insufficient balance errors keep the currency reported by the backend", () => {
   for (const symbol of ["CELO", "MNT", "USDT"]) {
     const message = readFriendlyError(

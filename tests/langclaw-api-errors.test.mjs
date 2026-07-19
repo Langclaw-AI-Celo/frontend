@@ -568,6 +568,25 @@ test("automation tasks reject display statuses that contradict task state", asyn
   }
 });
 
+test("automation tasks reject next runs before task creation", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const task = automationTaskRecord({
+    nextRunAt: "2026-07-19T04:59:00.000Z",
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json(automationDashboardRecord({ tasks: [task] }));
+
+  await assert.rejects(
+    getAutomationDashboard(walletSessionRecord()),
+    isInvalidAutomationError,
+  );
+});
+
 test("automation tasks require consistent last-run state", async (t) => {
   const originalFetch = globalThis.fetch;
 

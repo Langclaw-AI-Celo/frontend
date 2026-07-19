@@ -2103,7 +2103,7 @@ function isAutomationTask(value: unknown): value is AutomationTask {
       (isValidResponseTimestamp(lastRunAt) &&
         isAutomationRunStatus(lastRunStatus) &&
         Date.parse(lastRunAt) >= Date.parse(createdAt))) &&
-    isOptionalResponseTimestamp(value.nextRunAt) &&
+    isOptionalResponseTimestampAtOrAfter(value.nextRunAt, createdAt) &&
     isNonNegativeResponseInteger(value.consecutiveFailures) &&
     isNonNegativeResponseInteger(value.maxRetries) &&
     isPositiveResponseInteger(value.failureThreshold)

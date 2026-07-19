@@ -286,6 +286,34 @@ test("wallet challenge responses reject expired challenges", async (t) => {
   );
 });
 
+test("wallet challenge responses reject far-future issuance", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const now = Date.now();
+  const challenge = walletChallengeRecord({
+    expiresAt: new Date(now + 65 * 60 * 1000).toISOString(),
+    issuedAt: new Date(now + 60 * 60 * 1000).toISOString(),
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ challenge, configured: true });
+
+  await assert.rejects(
+    requestWalletChallenge({
+      address: challenge.address,
+      chainId: challenge.chainId,
+      purpose: challenge.purpose,
+    }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid wallet challenge data." &&
+      error.status === 500,
+  );
+});
+
 test("wallet challenges must match the requested account and purpose", async (t) => {
   const originalFetch = globalThis.fetch;
   const challenge = walletChallengeRecord();

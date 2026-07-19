@@ -1449,6 +1449,7 @@ function isWalletChallenge(value: unknown): value is WalletChallenge {
     isNonEmptyResponseString(challenge.domain) &&
     Number.isFinite(issuedAt) &&
     Number.isFinite(expiresAt) &&
+    issuedAt <= Date.now() + 5 * 60 * 1000 &&
     expiresAt > issuedAt &&
     expiresAt > Date.now() &&
     isNonEmptyResponseString(challenge.message) &&

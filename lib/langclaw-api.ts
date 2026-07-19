@@ -2276,6 +2276,9 @@ function isAutomationStats(value: unknown): value is AutomationStats {
     return false;
   }
 
+  const nextRunAt = value.nextRunAt;
+  const nextRunTaskName = value.nextRunTaskName;
+
   return (
     [
       value.activeTasks,
@@ -2286,8 +2289,9 @@ function isAutomationStats(value: unknown): value is AutomationStats {
       value.completedThisWeek,
     ].every(isNonNegativeResponseInteger) &&
     isBoundedResponseNumber(value.successRate, 0, 100) &&
-    isOptionalResponseTimestamp(value.nextRunAt) &&
-    isOptionalResponseString(value.nextRunTaskName)
+    ((nextRunAt === undefined && nextRunTaskName === undefined) ||
+      (isValidResponseTimestamp(nextRunAt) &&
+        isNonEmptyResponseString(nextRunTaskName)))
   );
 }
 

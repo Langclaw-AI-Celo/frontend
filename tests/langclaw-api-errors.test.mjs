@@ -875,6 +875,28 @@ test("automation settings reject malformed 0G limits", async (t) => {
   }
 });
 
+test("automation stats require complete next-run details", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const nextRun of [
+    { nextRunAt: "2026-07-20T05:00:00.000Z" },
+    { nextRunTaskName: "Daily Celo review" },
+  ]) {
+    const dashboard = automationDashboardRecord();
+    dashboard.stats = { ...dashboard.stats, ...nextRun };
+    globalThis.fetch = async () => Response.json(dashboard);
+
+    await assert.rejects(
+      getAutomationDashboard(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation notification endpoints reject malformed delivery data", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

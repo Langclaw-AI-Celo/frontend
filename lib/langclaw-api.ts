@@ -1498,7 +1498,7 @@ function isWalletSession(value: unknown): value is WalletAuth {
   return (
     isEvmAddressResponse(wallet.address) &&
     isNonEmptyResponseString(wallet.sessionToken) &&
-    isValidResponseTimestamp(wallet.sessionExpiresAt) &&
+    isFutureResponseTimestamp(wallet.sessionExpiresAt) &&
     isOptionalResponseString(wallet.message) &&
     isOptionalResponseString(wallet.signature)
   );
@@ -1791,12 +1791,16 @@ function isEvmAddressResponse(value: unknown) {
   return typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
 }
 
-function isValidResponseTimestamp(value: unknown) {
+function isValidResponseTimestamp(value: unknown): value is string {
   return (
     typeof value === "string" &&
     Boolean(value.trim()) &&
     Number.isFinite(Date.parse(value))
   );
+}
+
+function isFutureResponseTimestamp(value: unknown) {
+  return isValidResponseTimestamp(value) && Date.parse(value) > Date.now();
 }
 
 function invalidChatSessionResponse() {

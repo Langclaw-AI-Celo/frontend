@@ -346,6 +346,34 @@ test("wallet session responses reject malformed session credentials", async (t) 
   }
 });
 
+test("wallet session responses reject expired credentials", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    signature: "0xsigned",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      wallet: walletSessionRecord({
+        sessionExpiresAt: "2026-07-19T06:00:00.000Z",
+      }),
+    });
+
+  await assert.rejects(
+    createWalletSession(wallet),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid wallet session data." &&
+      error.status === 500,
+  );
+});
+
 test("wallet sessions must match the authenticated account", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {
@@ -1303,7 +1331,7 @@ function walletChallengeRecord(overrides = {}) {
 function walletSessionRecord(overrides = {}) {
   return {
     address: "0x1111111111111111111111111111111111111111",
-    sessionExpiresAt: "2026-07-19T06:00:00.000Z",
+    sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     sessionToken: "test-session",
     ...overrides,
   };

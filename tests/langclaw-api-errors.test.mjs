@@ -906,6 +906,33 @@ test("usage endpoints reject malformed balance and transaction data", async (t) 
   }
 });
 
+test("usage balances reject malformed monetary values", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const balance of [
+    usageBalanceRecord({ availableNeuron: "-1" }),
+    usageBalanceRecord({ reservedNeuron: "1.5" }),
+    usageBalanceRecord({ lifetimeDeposited0G: "1e3" }),
+    usageBalanceRecord({ availableNative: "-0.1" }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, wallet: wallet.address, balance });
+
+    await assert.rejects(
+      getUsageBalance(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("proof decision responses reject malformed chain records", async (t) => {
   const originalFetch = globalThis.fetch;
   const valid = proofDecisionsRecord();
@@ -1837,6 +1864,24 @@ function automationDashboardRecord(overrides = {}) {
       successRate: 100,
     },
     tasks: [automationTaskRecord()],
+    ...overrides,
+  };
+}
+
+function usageBalanceRecord(overrides = {}) {
+  return {
+    available0G: "1",
+    availableNative: "0.5",
+    availableNeuron: "1000000000",
+    lifetimeCharged0G: "0.1",
+    lifetimeChargedNative: "0.05",
+    lifetimeChargedNeuron: "100000000",
+    lifetimeDeposited0G: "2",
+    lifetimeDepositedNative: "1",
+    lifetimeDepositedNeuron: "2000000000",
+    reserved0G: "0.25",
+    reservedNative: "0.125",
+    reservedNeuron: "250000000",
     ...overrides,
   };
 }

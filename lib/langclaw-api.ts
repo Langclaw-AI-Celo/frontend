@@ -2741,6 +2741,18 @@ function isUsageBalancePayload(value: unknown): value is UsageBalancePayload {
   );
 }
 
+function isNonNegativeIntegerResponseString(value: unknown): value is string {
+  return typeof value === "string" && /^\d+$/.test(value);
+}
+
+function isNonNegativeDecimalResponseString(value: unknown): value is string {
+  return typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value);
+}
+
+function isOptionalNonNegativeDecimalResponseString(value: unknown) {
+  return value === undefined || isNonNegativeDecimalResponseString(value);
+}
+
 function isUsageBalance(value: unknown): value is UsageBalance {
   if (!isResponseObject(value)) {
     return false;
@@ -2752,20 +2764,22 @@ function isUsageBalance(value: unknown): value is UsageBalance {
     isOptionalResponseString(value.nativeSymbol) &&
     [
       value.availableNeuron,
-      value.available0G,
       value.reservedNeuron,
-      value.reserved0G,
       value.lifetimeDepositedNeuron,
-      value.lifetimeDeposited0G,
       value.lifetimeChargedNeuron,
+    ].every(isNonNegativeIntegerResponseString) &&
+    [
+      value.available0G,
+      value.reserved0G,
+      value.lifetimeDeposited0G,
       value.lifetimeCharged0G,
-    ].every(isNonEmptyResponseString) &&
+    ].every(isNonNegativeDecimalResponseString) &&
     [
       value.availableNative,
       value.reservedNative,
       value.lifetimeDepositedNative,
       value.lifetimeChargedNative,
-    ].every(isOptionalResponseString)
+    ].every(isOptionalNonNegativeDecimalResponseString)
   );
 }
 

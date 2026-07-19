@@ -2282,7 +2282,7 @@ export async function runAutomationTask(wallet: WalletAuth, taskId: string) {
     response,
   );
 
-  return payload.run;
+  return requireAutomationRun(payload.run);
 }
 
 export async function listAutomationRuns(wallet: WalletAuth, taskId?: string) {
@@ -2295,7 +2295,23 @@ export async function listAutomationRuns(wallet: WalletAuth, taskId?: string) {
     response,
   );
 
-  return payload.runs ?? [];
+  return requireAutomationRuns(payload.runs);
+}
+
+function requireAutomationRun(value: unknown) {
+  if (!isAutomationRun(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function requireAutomationRuns(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isAutomationRun)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
 }
 
 export async function getAutomationSettings(wallet: WalletAuth) {

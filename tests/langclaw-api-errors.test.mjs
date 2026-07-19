@@ -17,12 +17,14 @@ import {
   LangclawApiError,
   listApiKeys,
   listAlphaWatchlist,
+  listAutomationRuns,
   listChatSessions,
   listStrategyRuns,
   openStrategyPaperTrade,
   readFriendlyError,
   requestWalletChallenge,
   revokeApiKey,
+  runAutomationTask,
   runStrategyBacktest,
   scanStrategyPairs,
   setAllAutomationTasksStatus,
@@ -229,6 +231,35 @@ test("automation task mutations reject malformed records and flags", async (t) =
       error instanceof LangclawApiError &&
       error.message === "Backend returned invalid automation data.",
   );
+});
+
+test("automation run responses reject malformed records and collections", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, run: automationRunRecord({ status: "done" }) });
+  await assert.rejects(
+    runAutomationTask(wallet, "task-1"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid automation data.",
+  );
+
+  for (const runs of ["invalid", [automationRunRecord({ createdAt: "invalid" })]]) {
+    globalThis.fetch = async () => Response.json({ configured: true, runs });
+
+    await assert.rejects(
+      listAutomationRuns(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid automation data.",
+    );
+  }
 });
 
 test("chat session responses reject malformed collections and records", async (t) => {

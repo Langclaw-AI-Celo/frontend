@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
 
+import { buildContentSecurityPolicy } from "./lib/security-headers";
+
 const backendRewriteDestination = (
   process.env.LANGCLAW_BACKEND_REWRITE_URL || "http://43.129.56.85/celo"
 ).replace(/\/+$/, "");
@@ -7,20 +9,9 @@ const backendRewriteDestination = (
 const securityHeaders = [
   {
     key: "Content-Security-Policy",
-    value: [
-      "default-src 'self'",
-      "base-uri 'self'",
-      "object-src 'none'",
-      "frame-ancestors 'none'",
-      "form-action 'self'",
-      "img-src 'self' data: blob: https:",
-      "font-src 'self' data:",
-      "style-src 'self' 'unsafe-inline'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "connect-src 'self' http://localhost:3001 http://43.129.56.85 https: wss:",
-      "frame-src 'self' https:",
-      "worker-src 'self' blob:",
-    ].join("; "),
+    value: buildContentSecurityPolicy({
+      isDevelopment: process.env.NODE_ENV === "development",
+    }),
   },
   {
     key: "Referrer-Policy",

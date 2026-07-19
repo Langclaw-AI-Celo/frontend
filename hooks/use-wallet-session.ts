@@ -24,6 +24,11 @@ import {
   MINIPAY_CHAIN_ID,
 } from "@/lib/minipay";
 import { parseCachedWalletAuth } from "@/lib/wallet-auth-cache";
+import {
+  readStorageItem,
+  removeStorageItem,
+  writeStorageItem,
+} from "@/lib/browser-storage";
 
 export const WALLET_AUTH_UPDATED_EVENT = "langclaw-wallet-auth-updated";
 export const MINIPAY_SESSION_REQUIRED_MESSAGE =
@@ -152,7 +157,10 @@ export function useWalletSession() {
   const clearWalletAuth = useCallback(() => {
     if (address) {
       for (const chain of productChainOptions) {
-        window.localStorage.removeItem(getWalletAuthStorageKey(address, chain.id));
+        removeStorageItem(
+          accessLocalStorage,
+          getWalletAuthStorageKey(address, chain.id),
+        );
       }
     }
 
@@ -184,7 +192,8 @@ export function readCachedWalletAuth(
   }
 
   const chain = resolveProductChain(chainInput);
-  const raw = window.localStorage.getItem(
+  const raw = readStorageItem(
+    accessLocalStorage,
     getWalletAuthStorageKey(address, chain.id),
   );
 
@@ -196,9 +205,10 @@ function writeCachedWalletAuth(walletAuth: WalletAuth, chain: ProductChainId) {
     return;
   }
 
-  window.localStorage.setItem(
+  writeStorageItem(
+    accessLocalStorage,
     getWalletAuthStorageKey(walletAuth.address, chain),
-    JSON.stringify(walletAuth)
+    JSON.stringify(walletAuth),
   );
 }
 
@@ -214,6 +224,10 @@ export function cacheWalletAuth(
 
 function getWalletAuthStorageKey(address: string, chain: ProductChainId) {
   return `${WALLET_AUTH_STORAGE_PREFIX}:${chain}:${address.toLowerCase()}`;
+}
+
+function accessLocalStorage() {
+  return window.localStorage;
 }
 
 function dispatchWalletAuthUpdated() {

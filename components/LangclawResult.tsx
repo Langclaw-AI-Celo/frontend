@@ -72,6 +72,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { buildDiscoverAnswerContent } from "@/lib/chat-utils";
+import { safeExternalUrl } from "@/lib/external-url";
 import type {
   DefiRankingCoverage,
   DefiRankingMetrics,
@@ -779,6 +780,7 @@ function ProofLink({
   label: string;
   value?: string;
 }) {
+  const safeHref = safeExternalUrl(href);
   const content = (
     <div className="rounded-md border bg-background/70 p-2">
       <p className="font-medium text-foreground">{label}</p>
@@ -786,12 +788,12 @@ function ProofLink({
     </div>
   );
 
-  if (!href) {
+  if (!safeHref) {
     return content;
   }
 
   return (
-    <a href={href} rel="noreferrer" target="_blank">
+    <a href={safeHref} rel="noreferrer" target="_blank">
       {content}
     </a>
   );

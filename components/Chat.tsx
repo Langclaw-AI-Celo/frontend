@@ -124,6 +124,7 @@ import {
   uiMessagesToStoredMessages,
 } from "@/lib/chat-utils";
 import { createLangclawChatTransport } from "@/lib/langclaw-chat-transport";
+import { safeExternalUrl } from "@/lib/external-url";
 import {
   LANGCLAW_ALPHA_WATCHLIST_UPDATED_EVENT,
   buildAlphaWatchlistItem,
@@ -1287,7 +1288,7 @@ function OnChainDetails({ payload }: { payload: OnChainToolFinalPayload }) {
               {tool.sourceUrl && (
                 <a
                   className="break-all text-foreground underline underline-offset-2"
-                  href={tool.sourceUrl}
+                  href={safeExternalUrl(tool.sourceUrl)}
                   rel="noreferrer"
                   target="_blank"
                 >
@@ -1319,7 +1320,7 @@ function OnChainProofDetails({
       </div>
       <a
         className="rounded-md border bg-background p-2"
-        href={proof.chain.explorerUrl}
+        href={safeExternalUrl(proof.chain.explorerUrl)}
         rel="noreferrer"
         target="_blank"
       >
@@ -2093,7 +2094,7 @@ function OnChainRecordPreview({
           {url && (
             <a
               className="break-all text-foreground underline underline-offset-2"
-              href={url}
+              href={safeExternalUrl(url)}
               rel="noreferrer"
               target="_blank"
             >
@@ -2155,13 +2156,15 @@ function PreviewField({
   label: string;
   value: string;
 }) {
+  const safeHref = safeExternalUrl(href);
+
   return (
     <div className="min-w-0 rounded border bg-background/60 px-2 py-1.5">
       <p className="text-[11px] uppercase text-muted-foreground">{label}</p>
-      {href ? (
+      {safeHref ? (
         <a
           className="mt-0.5 block break-all text-foreground underline underline-offset-2"
-          href={href}
+          href={safeHref}
           rel="noreferrer"
           target="_blank"
         >

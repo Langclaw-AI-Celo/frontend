@@ -5,6 +5,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { safeExternalUrl } from "@/lib/external-url";
 import { cn } from "@/lib/utils";
 import { BookIcon, ChevronDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
@@ -62,7 +63,7 @@ export type SourceProps = ComponentProps<"a">;
 export const Source = ({ href, title, children, ...props }: SourceProps) => (
   <a
     className="flex items-center gap-2"
-    href={href}
+    href={safeExternalUrl(href)}
     rel="noreferrer"
     target="_blank"
     {...props}

@@ -2131,7 +2131,8 @@ function isAutomationNotification(
     (value.status === "unread" || value.status === "read") &&
     isOptionalResponseString(value.taskId) &&
     isOptionalResponseString(value.runId) &&
-    isOptionalResponseTimestamp(value.readAt) &&
+    ((value.status === "unread" && value.readAt === undefined) ||
+      (value.status === "read" && isValidResponseTimestamp(value.readAt))) &&
     isValidResponseTimestamp(value.createdAt)
   );
 }

@@ -1796,12 +1796,16 @@ function invalidApiKeyResponse() {
 
 export async function getMemoryDashboard(wallet: WalletAuth) {
   const response = await memoryRequest({ action: "list", wallet });
+  const memories = requireMemoryItems(response.memories);
 
   return {
     configured: true,
-    memories: response.memories ?? [],
+    memories,
     settings: requireMemorySettings(response.settings),
-    stats: response.stats ?? buildMemoryStats(response.memories ?? []),
+    stats:
+      response.stats === undefined
+        ? buildMemoryStats(memories)
+        : requireMemoryStats(response.stats),
   } satisfies MemoryDashboard;
 }
 
@@ -1817,11 +1821,7 @@ export async function setMemoryStatus(
     wallet,
   });
 
-  if (!response.memory) {
-    throw new LangclawApiError("Memory was not returned.", 500);
-  }
-
-  return response.memory;
+  return requireMemoryItem(response.memory);
 }
 
 export async function setManyMemoryStatuses(
@@ -1836,7 +1836,7 @@ export async function setManyMemoryStatuses(
     wallet,
   });
 
-  return response.memories ?? [];
+  return requireMemoryItems(response.memories);
 }
 
 export async function deleteMemoryRecord(
@@ -1849,7 +1849,10 @@ export async function deleteMemoryRecord(
     wallet,
   });
 
-  return response.deletedIds ?? (response.deleted ? [memoryId] : []);
+  return readDeletedMemoryIds(
+    response.deletedIds,
+    response.deleted ? [memoryId] : [],
+  );
 }
 
 export async function deleteManyMemoryRecords(
@@ -1862,7 +1865,7 @@ export async function deleteManyMemoryRecords(
     wallet,
   });
 
-  return response.deletedIds ?? [];
+  return readDeletedMemoryIds(response.deletedIds, []);
 }
 
 export async function getMemorySettings(wallet: WalletAuth) {
@@ -2403,12 +2406,101 @@ async function readAutomationResponse<T>(response: Response) {
   return payload as T;
 }
 
-function requireMemorySettings(settings?: MemorySettings) {
-  if (!settings) {
-    throw new LangclawApiError("Memory settings were not returned.", 500);
+function requireMemoryItems(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isMemoryItem)) {
+    throw invalidMemoryResponse();
   }
 
-  return settings;
+  return value as MemoryItem[];
+}
+
+function requireMemoryItem(value: unknown) {
+  if (!isMemoryItem(value)) {
+    throw invalidMemoryResponse();
+  }
+
+  return value;
+}
+
+function isMemoryItem(value: unknown): value is MemoryItem {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const memory = value as Record<string, unknown>;
+
+  return (
+    isNonEmptyResponseString(memory.id) &&
+    isNonEmptyResponseString(memory.memory) &&
+    ["Preference", "Project", "Workflow", "Personal", "API"].includes(
+      String(memory.category),
+    ) &&
+    isNonEmptyResponseString(memory.scope) &&
+    (memory.status === "active" || memory.status === "disabled") &&
+    isNonEmptyResponseString(memory.source) &&
+    isValidResponseTimestamp(memory.lastUsed) &&
+    isValidResponseTimestamp(memory.updatedAt) &&
+    typeof memory.confidence === "number" &&
+    Number.isFinite(memory.confidence) &&
+    memory.confidence >= 0 &&
+    memory.confidence <= 100
+  );
+}
+
+function requireMemorySettings(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw invalidMemoryResponse();
+  }
+
+  const settings = value as Record<string, unknown>;
+
+  if (
+    typeof settings.autoDisableLowConfidence !== "boolean" ||
+    typeof settings.captureEnabled !== "boolean" ||
+    typeof settings.crossChatRecall !== "boolean" ||
+    typeof settings.projectScopedRecall !== "boolean" ||
+    !Number.isInteger(settings.retentionDays) ||
+    (settings.retentionDays as number) < 0 ||
+    !isValidResponseTimestamp(settings.updatedAt)
+  ) {
+    throw invalidMemoryResponse();
+  }
+
+  return value as MemorySettings;
+}
+
+function requireMemoryStats(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw invalidMemoryResponse();
+  }
+
+  const stats = value as Record<string, unknown>;
+
+  if (
+    ![stats.active, stats.disabled, stats.projectScoped, stats.total].every(
+      (entry) => typeof entry === "number" && Number.isInteger(entry) && entry >= 0,
+    )
+  ) {
+    throw invalidMemoryResponse();
+  }
+
+  return value as MemoryStats;
+}
+
+function readDeletedMemoryIds(value: unknown, fallback: string[]) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (!Array.isArray(value) || !value.every(isNonEmptyResponseString)) {
+    throw invalidMemoryResponse();
+  }
+
+  return value as string[];
+}
+
+function invalidMemoryResponse() {
+  return new LangclawApiError("Backend returned invalid memory data.", 500);
 }
 
 function buildMemoryStats(memories: MemoryItem[]): MemoryStats {

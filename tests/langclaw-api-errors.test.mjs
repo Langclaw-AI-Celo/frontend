@@ -4,12 +4,16 @@ import test from "node:test";
 import {
   checkBackendHealth,
   createApiKey,
+  deleteManyMemoryRecords,
   getChatSession,
+  getMemoryDashboard,
+  getMemorySettings,
   LangclawApiError,
   listApiKeys,
   listChatSessions,
   readFriendlyError,
   revokeApiKey,
+  setMemoryStatus,
   streamChat,
   streamDiscover,
 } from "../lib/langclaw-api.ts";
@@ -146,6 +150,69 @@ test("API key responses reject malformed collections and records", async (t) => 
         error.status === 500,
     );
   }
+});
+
+test("memory responses reject malformed records, settings, stats, and IDs", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionToken: "test-session",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { memories: "invalid", settings: memorySettings() },
+    {
+      memories: [memoryRecord({ confidence: 101 })],
+      settings: memorySettings(),
+    },
+    { memories: [], settings: "invalid" },
+    { memories: [], settings: memorySettings(), stats: { total: "0" } },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, ...payload });
+
+    await assert.rejects(
+      getMemoryDashboard(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid memory data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, memory: { id: "memory-1" } });
+  await assert.rejects(
+    setMemoryStatus(wallet, "memory-1", "disabled"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid memory data." &&
+      error.status === 500,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, settings: [] });
+  await assert.rejects(
+    getMemorySettings(wallet),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid memory data." &&
+      error.status === 500,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, deletedIds: "memory-1" });
+  await assert.rejects(
+    deleteManyMemoryRecords(wallet, ["memory-1"]),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid memory data." &&
+      error.status === 500,
+  );
 });
 
 test("streaming responses reject malformed NDJSON chunks", async (t) => {
@@ -361,6 +428,33 @@ function apiKeyRecord(overrides = {}) {
     maskedKey: "lc_live_••••1234",
     name: "Research key",
     status: "active",
+    ...overrides,
+  };
+}
+
+function memoryRecord(overrides = {}) {
+  return {
+    category: "Project",
+    confidence: 90,
+    id: "memory-1",
+    lastUsed: "2026-07-19",
+    memory: "Prefer Celo for this project.",
+    scope: "Langclaw",
+    source: "Chat",
+    status: "active",
+    updatedAt: "2026-07-19",
+    ...overrides,
+  };
+}
+
+function memorySettings(overrides = {}) {
+  return {
+    autoDisableLowConfidence: true,
+    captureEnabled: true,
+    crossChatRecall: true,
+    projectScopedRecall: true,
+    retentionDays: 365,
+    updatedAt: "2026-07-19T05:00:00.000Z",
     ...overrides,
   };
 }

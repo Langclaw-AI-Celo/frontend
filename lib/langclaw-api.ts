@@ -3445,11 +3445,15 @@ async function memoryRequest(body: {
   const response = await postJson("/api/memory", body);
   const payload = await readJsonResponse<MemoryResponse>(response);
 
-  if (!payload.configured) {
+  if (payload.configured === false) {
     throw new LangclawApiError(
       payload.error || "Memory storage is not configured.",
       503,
     );
+  }
+
+  if (payload.configured !== true) {
+    throw invalidMemoryResponse();
   }
 
   if (payload.error) {
@@ -3467,11 +3471,15 @@ async function memorySettingsRequest(body: {
   const response = await postJson("/api/memory/settings", body);
   const payload = await readJsonResponse<MemoryResponse>(response);
 
-  if (!payload.configured) {
+  if (payload.configured === false) {
     throw new LangclawApiError(
       payload.error || "Memory settings are not configured.",
       503,
     );
+  }
+
+  if (payload.configured !== true) {
+    throw invalidMemoryResponse();
   }
 
   if (payload.error) {

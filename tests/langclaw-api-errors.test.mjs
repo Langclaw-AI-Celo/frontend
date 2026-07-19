@@ -131,6 +131,40 @@ test("memory deletion rejects malformed mutation flags", async (t) => {
   );
 });
 
+test("memory responses reject malformed configured flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, payload] of [
+    [
+      () => getMemoryDashboard(wallet),
+      {
+        configured: "true",
+        memories: [],
+        settings: memorySettings(),
+      },
+    ],
+    [
+      () => getMemorySettings(wallet),
+      { configured: 1, settings: memorySettings() },
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid memory data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("successful responses reject invalid JSON bodies", async (t) => {
   const originalFetch = globalThis.fetch;
 

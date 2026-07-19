@@ -2222,6 +2222,10 @@ function isAutomationNotification(
   );
 }
 
+function isAutomation0GAmount(value: unknown): value is string {
+  return typeof value === "string" && /^\d+(?:\.\d{1,18})?$/.test(value);
+}
+
 function isAutomationSettings(value: unknown): value is AutomationSettings {
   if (!isResponseObject(value)) {
     return false;
@@ -2259,10 +2263,10 @@ function isAutomationSettings(value: unknown): value is AutomationSettings {
         notificationChannels.includes("telegram"))) &&
     typeof value.autoPauseRepeatedFailures === "boolean" &&
     typeof value.writeRunLogsToMemory === "boolean" &&
-    isNonEmptyResponseString(value.dailyLimit0G) &&
-    isNonEmptyResponseString(value.monthlyCap0G) &&
+    isAutomation0GAmount(value.dailyLimit0G) &&
+    isAutomation0GAmount(value.monthlyCap0G) &&
     ["pause", "alert", "allow"].includes(String(value.limitBehavior)) &&
-    isNonEmptyResponseString(value.lowBalanceThreshold0G) &&
+    isAutomation0GAmount(value.lowBalanceThreshold0G) &&
     ["notify", "pause", "continue"].includes(String(value.thresholdAction))
   );
 }

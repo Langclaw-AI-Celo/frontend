@@ -851,6 +851,30 @@ test("automation settings reject duplicate notification channels", async (t) => 
   );
 });
 
+test("automation settings reject malformed 0G limits", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const settings of [
+    automationSettingsRecord({ dailyLimit0G: "-1" }),
+    automationSettingsRecord({ monthlyCap0G: "1e3" }),
+    automationSettingsRecord({
+      lowBalanceThreshold0G: "0.1234567890123456789",
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, settings });
+
+    await assert.rejects(
+      getAutomationSettings(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation notification endpoints reject malformed delivery data", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

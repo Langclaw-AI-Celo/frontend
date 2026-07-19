@@ -2355,7 +2355,7 @@ export async function listInAppAutomationNotifications(
     notifications: AutomationInAppNotification[];
   }>(response);
 
-  return payload.notifications ?? [];
+  return requireAutomationNotifications(payload.notifications);
 }
 
 export async function markAutomationNotificationRead(
@@ -2371,7 +2371,7 @@ export async function markAutomationNotificationRead(
     notification: AutomationInAppNotification;
   }>(response);
 
-  return payload.notification;
+  return requireAutomationNotification(payload.notification);
 }
 
 export async function markAllAutomationNotificationsRead(wallet: WalletAuth) {
@@ -2381,7 +2381,7 @@ export async function markAllAutomationNotificationsRead(wallet: WalletAuth) {
   });
   const payload = await readAutomationResponse<{ read?: boolean }>(response);
 
-  return Boolean(payload.read);
+  return requireAutomationBoolean(payload.read);
 }
 
 export async function requestAutomationEmailLink(
@@ -2394,9 +2394,20 @@ export async function requestAutomationEmailLink(
     wallet,
   });
 
-  return readAutomationResponse<{
+  const payload = await readAutomationResponse<{
     link: { email: string; expiresAt: string; sent: boolean };
   }>(response);
+
+  if (
+    !isResponseObject(payload.link) ||
+    !isNonEmptyResponseString(payload.link.email) ||
+    !isValidResponseTimestamp(payload.link.expiresAt) ||
+    typeof payload.link.sent !== "boolean"
+  ) {
+    throw invalidAutomationResponse();
+  }
+
+  return payload;
 }
 
 export async function verifyAutomationEmailLink(
@@ -2442,7 +2453,7 @@ export async function createAutomationTelegramLink(wallet: WalletAuth) {
     };
   }>(response);
 
-  return payload.link;
+  return requireAutomationTelegramLink(payload.link);
 }
 
 export async function pollAutomationTelegramLink(wallet: WalletAuth) {
@@ -2451,11 +2462,22 @@ export async function pollAutomationTelegramLink(wallet: WalletAuth) {
     wallet,
   });
 
-  return readAutomationResponse<{
+  const payload = await readAutomationResponse<{
     linked: boolean;
     settings?: AutomationSettings;
     status: string;
   }>(response);
+
+  if (
+    typeof payload.linked !== "boolean" ||
+    !isNonEmptyResponseString(payload.status) ||
+    (payload.settings !== undefined &&
+      !isAutomationSettings(payload.settings))
+  ) {
+    throw invalidAutomationResponse();
+  }
+
+  return payload;
 }
 
 export async function unlinkAutomationTelegram(wallet: WalletAuth) {
@@ -2476,6 +2498,48 @@ function requireAutomationSettings(value: unknown) {
   }
 
   return value;
+}
+
+function requireAutomationNotifications(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isAutomationNotification)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function requireAutomationNotification(value: unknown) {
+  if (!isAutomationNotification(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  return value;
+}
+
+function requireAutomationTelegramLink(value: unknown) {
+  if (!isResponseObject(value)) {
+    throw invalidAutomationResponse();
+  }
+
+  if (
+    ![
+      value.botUsername,
+      value.code,
+      value.command,
+      value.deepLink,
+    ].every(isNonEmptyResponseString) ||
+    !isValidResponseTimestamp(value.expiresAt)
+  ) {
+    throw invalidAutomationResponse();
+  }
+
+  return value as {
+    botUsername: string;
+    code: string;
+    command: string;
+    deepLink: string;
+    expiresAt: string;
+  };
 }
 
 export async function getUsageBalance(wallet: WalletAuth, chain?: ProductChainId) {

@@ -6,6 +6,7 @@ import {
   clearAlphaWatchlist,
   createApiKey,
   createAutomationTask,
+  createAutomationTelegramLink,
   createWalletSession,
   deleteAutomationTask,
   deleteAlphaWatchlistItem,
@@ -19,11 +20,14 @@ import {
   listApiKeys,
   listAlphaWatchlist,
   listAutomationRuns,
+  listInAppAutomationNotifications,
   listChatSessions,
   listStrategyRuns,
   openStrategyPaperTrade,
+  pollAutomationTelegramLink,
   readFriendlyError,
   requestWalletChallenge,
+  requestAutomationEmailLink,
   revokeApiKey,
   runAutomationTask,
   runStrategyBacktest,
@@ -31,6 +35,8 @@ import {
   setAllAutomationTasksStatus,
   setAutomationTaskStatus,
   setMemoryStatus,
+  markAllAutomationNotificationsRead,
+  markAutomationNotificationRead,
   streamChat,
   streamDiscover,
   unlinkAutomationEmail,
@@ -295,6 +301,65 @@ test("automation settings endpoints reject malformed configuration data", async 
     );
   }
 });
+
+test("automation notification endpoints reject malformed delivery data", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, notifications: "invalid" });
+  await assert.rejects(
+    listInAppAutomationNotifications(wallet),
+    isInvalidAutomationError,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, notification: { id: "notification-1" } });
+  await assert.rejects(
+    markAutomationNotificationRead(wallet, "notification-1"),
+    isInvalidAutomationError,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, read: "true" });
+  await assert.rejects(
+    markAllAutomationNotificationsRead(wallet),
+    isInvalidAutomationError,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, link: { email: "test@example.com", expiresAt: "invalid", sent: true } });
+  await assert.rejects(
+    requestAutomationEmailLink(wallet, "test@example.com"),
+    isInvalidAutomationError,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, link: { botUsername: "langclaw_bot" } });
+  await assert.rejects(
+    createAutomationTelegramLink(wallet),
+    isInvalidAutomationError,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, linked: "false", status: "pending" });
+  await assert.rejects(
+    pollAutomationTelegramLink(wallet),
+    isInvalidAutomationError,
+  );
+});
+
+function isInvalidAutomationError(error) {
+  return (
+    error instanceof LangclawApiError &&
+    error.message === "Backend returned invalid automation data." &&
+    error.status === 500
+  );
+}
 
 test("chat session responses reject malformed collections and records", async (t) => {
   const originalFetch = globalThis.fetch;

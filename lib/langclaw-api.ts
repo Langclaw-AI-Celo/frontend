@@ -3257,6 +3257,7 @@ export async function listAlphaWatchlist(wallet: WalletAuth) {
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
+  requireWatchlistConfigured(payload.configured);
   return requireWatchlistItems(payload.items);
 }
 
@@ -3271,6 +3272,7 @@ export async function upsertAlphaWatchlistItem(
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
+  requireWatchlistConfigured(payload.configured);
   if (!isWatchlistItem(payload.item)) {
     throw invalidWatchlistResponse();
   }
@@ -3289,6 +3291,7 @@ export async function deleteAlphaWatchlistItem(
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
+  requireWatchlistConfigured(payload.configured);
   return readWatchlistMutationFlag(payload.deleted);
 }
 
@@ -3299,7 +3302,14 @@ export async function clearAlphaWatchlist(wallet: WalletAuth) {
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
+  requireWatchlistConfigured(payload.configured);
   return readWatchlistMutationFlag(payload.cleared);
+}
+
+function requireWatchlistConfigured(value: unknown) {
+  if (value !== true) {
+    throw invalidWatchlistResponse();
+  }
 }
 
 function requireWatchlistItems(value: unknown) {

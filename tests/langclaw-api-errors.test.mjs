@@ -730,6 +730,38 @@ test("watchlist responses reject malformed items and mutation flags", async (t) 
   }
 });
 
+test("watchlist responses require configured envelopes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, payload] of [
+    [() => listAlphaWatchlist(wallet), { configured: false, items: [] }],
+    [
+      () => upsertAlphaWatchlistItem(wallet, watchlistRecord()),
+      { configured: "true", item: watchlistRecord() },
+    ],
+    [
+      () => deleteAlphaWatchlistItem(wallet, "watch-1"),
+      { configured: 1, deleted: true },
+    ],
+    [() => clearAlphaWatchlist(wallet), { cleared: true }],
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid watchlist data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("strategy backtests reject malformed response records", async (t) => {
   const originalFetch = globalThis.fetch;
   const valid = strategyBacktestRecord();

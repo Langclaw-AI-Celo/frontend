@@ -3390,11 +3390,15 @@ async function chatSessionsRequest(body: {
   const response = await postJson("/api/chat/sessions", body);
   const payload = await readJsonResponse<ChatSessionsResponse>(response);
 
-  if (!payload.configured) {
+  if (payload.configured === false) {
     throw new LangclawApiError(
       payload.error || "Chat session storage is not configured.",
       503,
     );
+  }
+
+  if (payload.configured !== true) {
+    throw invalidChatSessionResponse();
   }
 
   if (payload.error) {

@@ -74,6 +74,25 @@ test("chat session deletion rejects malformed mutation flags", async (t) => {
   );
 });
 
+test("chat session responses reject malformed configured flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: "true", sessions: [] });
+
+  await assert.rejects(
+    listChatSessions(walletSessionRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid chat session data." &&
+      error.status === 500,
+  );
+});
+
 test("memory deletion rejects malformed mutation flags", async (t) => {
   const originalFetch = globalThis.fetch;
 

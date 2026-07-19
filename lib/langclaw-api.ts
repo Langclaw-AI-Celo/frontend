@@ -1413,7 +1413,12 @@ export async function requestWalletChallenge(input: {
     throw new LangclawApiError("Wallet challenge was not returned.", 500);
   }
 
-  if (!isWalletChallenge(payload.challenge)) {
+  if (
+    !isWalletChallenge(payload.challenge) ||
+    payload.challenge.address.toLowerCase() !== input.address.trim().toLowerCase() ||
+    (input.chainId !== undefined && payload.challenge.chainId !== input.chainId) ||
+    payload.challenge.purpose !== (input.purpose ?? "session")
+  ) {
     throw new LangclawApiError(
       "Backend returned invalid wallet challenge data.",
       500,

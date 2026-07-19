@@ -187,6 +187,37 @@ test("wallet challenge responses reject malformed signing data", async (t) => {
   }
 });
 
+test("wallet challenges must match the requested account and purpose", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const challenge = walletChallengeRecord();
+  const request = {
+    address: challenge.address,
+    chainId: challenge.chainId,
+    purpose: challenge.purpose,
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const mismatchedChallenge of [
+    { ...challenge, address: "0x2222222222222222222222222222222222222222" },
+    { ...challenge, chainId: 5000 },
+    { ...challenge, purpose: "api-key:create" },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ challenge: mismatchedChallenge, configured: true });
+
+    await assert.rejects(
+      requestWalletChallenge(request),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid wallet challenge data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("wallet session responses reject malformed session credentials", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {

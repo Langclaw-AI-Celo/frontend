@@ -17,6 +17,7 @@ import {
   listStrategyRuns,
   openStrategyPaperTrade,
   readFriendlyError,
+  requestWalletChallenge,
   revokeApiKey,
   runStrategyBacktest,
   scanStrategyPairs,
@@ -87,6 +88,34 @@ test("backend health rejects malformed service status data", async (t) => {
       (error) =>
         error instanceof LangclawApiError &&
         error.message === "Backend returned invalid health data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("wallet challenge responses reject malformed signing data", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const challenge = walletChallengeRecord();
+
+  for (const invalidChallenge of [
+    { ...challenge, chainId: "42220" },
+    { ...challenge, expiresAt: "invalid" },
+    { ...challenge, purpose: "withdraw" },
+    { ...challenge, nonce: "" },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ challenge: invalidChallenge, configured: true });
+
+    await assert.rejects(
+      requestWalletChallenge({ address: challenge.address, chainId: 42220 }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid wallet challenge data." &&
         error.status === 500,
     );
   }
@@ -645,6 +674,21 @@ function chatSessionRecord(overrides = {}) {
     pinned: false,
     title: "CELO research",
     updatedAt: "2026-07-19T05:01:00.000Z",
+    ...overrides,
+  };
+}
+
+function walletChallengeRecord(overrides = {}) {
+  return {
+    address: "0x1111111111111111111111111111111111111111",
+    chainId: 42220,
+    domain: "langclawcelo.vercel.app",
+    expiresAt: "2026-07-19T05:05:00.000Z",
+    issuedAt: "2026-07-19T05:00:00.000Z",
+    message: "Sign in to Langclaw.",
+    nonce: "nonce-1",
+    purpose: "session",
+    uri: "https://langclawcelo.vercel.app",
     ...overrides,
   };
 }

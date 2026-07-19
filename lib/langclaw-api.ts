@@ -1413,7 +1413,44 @@ export async function requestWalletChallenge(input: {
     throw new LangclawApiError("Wallet challenge was not returned.", 500);
   }
 
+  if (!isWalletChallenge(payload.challenge)) {
+    throw new LangclawApiError(
+      "Backend returned invalid wallet challenge data.",
+      500,
+    );
+  }
+
   return payload.challenge;
+}
+
+function isWalletChallenge(value: unknown): value is WalletChallenge {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const challenge = value as Record<string, unknown>;
+  const issuedAt =
+    typeof challenge.issuedAt === "string"
+      ? Date.parse(challenge.issuedAt)
+      : Number.NaN;
+  const expiresAt =
+    typeof challenge.expiresAt === "string"
+      ? Date.parse(challenge.expiresAt)
+      : Number.NaN;
+
+  return (
+    isEvmAddressResponse(challenge.address) &&
+    isPositiveResponseInteger(challenge.chainId) &&
+    isNonEmptyResponseString(challenge.domain) &&
+    Number.isFinite(issuedAt) &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > issuedAt &&
+    isNonEmptyResponseString(challenge.message) &&
+    isNonEmptyResponseString(challenge.nonce) &&
+    (challenge.purpose === "api-key:create" ||
+      challenge.purpose === "session") &&
+    isNonEmptyResponseString(challenge.uri)
+  );
 }
 
 export async function createWalletSession(wallet: WalletAuth) {
@@ -1712,6 +1749,10 @@ function isStoredChatMessage(value: unknown) {
 
 function isNonEmptyResponseString(value: unknown): value is string {
   return typeof value === "string" && Boolean(value.trim());
+}
+
+function isEvmAddressResponse(value: unknown) {
+  return typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
 }
 
 function isValidResponseTimestamp(value: unknown) {

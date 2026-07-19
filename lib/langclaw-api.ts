@@ -2030,6 +2030,12 @@ function isAutomationDashboard(value: unknown): value is AutomationDashboard {
   );
 }
 
+function isAutomationScheduleTime(value: unknown): value is string {
+  return (
+    typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
+  );
+}
+
 function isAutomationTask(value: unknown): value is AutomationTask {
   if (!isResponseObject(value)) {
     return false;
@@ -2053,7 +2059,7 @@ function isAutomationTask(value: unknown): value is AutomationTask {
         ["daily", "weekly", "monthly"].includes(
           String(value.scheduleFrequency),
         )) &&
-    isNonEmptyResponseString(value.scheduleTime) &&
+    isAutomationScheduleTime(value.scheduleTime) &&
     (value.scheduleWeekday === undefined ||
       isBoundedResponseInteger(value.scheduleWeekday, 0, 6)) &&
     (value.scheduleMonthDay === undefined ||

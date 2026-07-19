@@ -503,6 +503,28 @@ test("scheduled automation tasks require a frequency", async (t) => {
   );
 });
 
+test("automation tasks reject malformed schedule times", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const scheduleTime of ["9:00", "24:00", "12:60"]) {
+    globalThis.fetch = async () =>
+      Response.json(
+        automationDashboardRecord({
+          tasks: [automationTaskRecord({ scheduleTime })],
+        }),
+      );
+
+    await assert.rejects(
+      getAutomationDashboard(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation tasks reject reversed timestamps", async (t) => {
   const originalFetch = globalThis.fetch;
   const task = automationTaskRecord({

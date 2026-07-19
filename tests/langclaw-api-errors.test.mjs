@@ -153,6 +153,55 @@ test("streams reject unsupported event types", async (t) => {
   }
 });
 
+test("streams reject malformed object event payloads", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const cases = [
+    [
+      () => streamDiscover({ topic: "CELO" }),
+      [
+        '{"type":"progress","event":[]}\n',
+        '{"type":"result"}\n',
+        '{"type":"result","payload":"invalid"}\n',
+      ],
+    ],
+    [
+      () => streamChat({ message: "Check CELO" }),
+      [
+        '{"type":"direct","payload":42}\n',
+        '{"type":"tool_plan","plan":null}\n',
+        '{"type":"tool_call","event":"invalid"}\n',
+        '{"type":"tool_result","event":[]}\n',
+        '{"type":"tool_final"}\n',
+        '{"type":"progress","event":false}\n',
+        '{"type":"result","payload":"invalid"}\n',
+      ],
+    ],
+  ];
+
+  for (const [request, bodies] of cases) {
+    for (const body of bodies) {
+      globalThis.fetch = async () =>
+        new Response(body, {
+          headers: { "Content-Type": "application/x-ndjson" },
+          status: 200,
+        });
+
+      await assert.rejects(
+        request(),
+        (error) =>
+          error instanceof LangclawApiError &&
+          error.message === "Backend returned an unexpected streaming response." &&
+          error.status === 200,
+      );
+    }
+  }
+});
+
 test("insufficient balance errors keep the currency reported by the backend", () => {
   for (const symbol of ["CELO", "MNT", "USDT"]) {
     const message = readFriendlyError(

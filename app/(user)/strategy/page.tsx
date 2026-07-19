@@ -73,6 +73,7 @@ import {
   productChainOptions,
   resolveProductChain,
 } from "@/lib/chains";
+import { safeExternalUrl } from "@/lib/external-url";
 
 const samplePairs = [
   {
@@ -937,7 +938,11 @@ function StrategyProofPanel({
         </div>
         {proof.explorerUrl && (
           <Button asChild className="mt-4" size="sm" variant="outline">
-            <a href={proof.explorerUrl} rel="noreferrer" target="_blank">
+            <a
+              href={safeExternalUrl(proof.explorerUrl)}
+              rel="noreferrer"
+              target="_blank"
+            >
               <ArrowUpRightIcon data-icon="inline-start" />
               Open {proof.chainName ?? "chain"} proof
             </a>

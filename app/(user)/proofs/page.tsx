@@ -58,6 +58,7 @@ import {
   productChainOptions,
   resolveProductChain,
 } from "@/lib/chains";
+import { safeExternalUrl } from "@/lib/external-url";
 
 export default function ProofsPage() {
   const [selectedChain, setSelectedChain] =
@@ -380,7 +381,11 @@ function DecisionRow({ decision }: { decision: ProofDecision }) {
       <TableCell className="text-right">
         {decision.explorerUrl ? (
           <Button asChild size="sm" variant="outline">
-            <a href={decision.explorerUrl} rel="noreferrer" target="_blank">
+            <a
+              href={safeExternalUrl(decision.explorerUrl)}
+              rel="noreferrer"
+              target="_blank"
+            >
               <ExternalLinkIcon className="size-4" />
               {shortHash(decision.txHash)}
             </a>
@@ -424,7 +429,11 @@ function StrategyRow({ record }: { record: StrategyRunRecord }) {
       <TableCell className="text-right">
         {record.explorerUrl ? (
           <Button asChild size="sm" variant="outline">
-            <a href={record.explorerUrl} rel="noreferrer" target="_blank">
+            <a
+              href={safeExternalUrl(record.explorerUrl)}
+              rel="noreferrer"
+              target="_blank"
+            >
               <ExternalLinkIcon className="size-4" />
               {shortHash(record.txHash)}
             </a>

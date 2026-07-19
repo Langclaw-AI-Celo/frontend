@@ -43,6 +43,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { useWalletSession } from "@/hooks/use-wallet-session";
+import { safeExternalUrl } from "@/lib/external-url";
 import {
   createAutomationTelegramLink,
   getMemorySettings,
@@ -355,14 +356,20 @@ export default function Page() {
     try {
       const wallet = await requireWallet();
       const link = await createAutomationTelegramLink(wallet);
+      const deepLink = safeExternalUrl(link.deepLink);
+
+      if (!deepLink) {
+        throw new Error("Telegram returned an invalid link.");
+      }
+
       setTelegramCommand(link.command);
-      setTelegramDeepLink(link.deepLink);
+      setTelegramDeepLink(deepLink);
       setTelegramBotUsername(link.botUsername);
       setTelegramStatus(`Waiting for @${link.botUsername} confirmation...`);
 
       if (telegramWindow) {
         telegramWindow.opener = null;
-        telegramWindow.location.href = link.deepLink;
+        telegramWindow.location.href = deepLink;
       } else {
         setTelegramStatus(
           `Open @${link.botUsername} and send the fallback command below.`,
@@ -675,7 +682,7 @@ export default function Page() {
                 {telegramDeepLink && (
                   <Button asChild variant="outline">
                     <a
-                      href={telegramDeepLink}
+                      href={safeExternalUrl(telegramDeepLink)}
                       rel="noreferrer"
                       target="_blank"
                     >

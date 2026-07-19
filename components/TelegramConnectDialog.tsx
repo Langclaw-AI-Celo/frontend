@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useWalletSession } from "@/hooks/use-wallet-session";
+import { safeExternalUrl } from "@/lib/external-url";
 import {
   createAutomationTelegramLink,
   getAutomationSettings,
@@ -149,15 +150,20 @@ export function useTelegramConnectGate() {
     try {
       const wallet = await getWalletAuth({ chain: requiredChainRef.current });
       const link = await createAutomationTelegramLink(wallet);
+      const deepLink = safeExternalUrl(link.deepLink);
+
+      if (!deepLink) {
+        throw new Error("Telegram returned an invalid link.");
+      }
 
       setTelegramCommand(link.command);
-      setTelegramDeepLink(link.deepLink);
+      setTelegramDeepLink(deepLink);
       setTelegramBotUsername(link.botUsername);
       setTelegramStatus(`Waiting for @${link.botUsername} confirmation...`);
 
       if (telegramWindow) {
         telegramWindow.opener = null;
-        telegramWindow.location.href = link.deepLink;
+        telegramWindow.location.href = deepLink;
       } else {
         setTelegramStatus(
           `Open @${link.botUsername} and send the fallback command below.`,
@@ -278,7 +284,11 @@ function TelegramConnectDialog({
         <DialogFooter>
           {deepLink && (
             <Button asChild type="button" variant="outline">
-              <a href={deepLink} rel="noreferrer" target="_blank">
+              <a
+                href={safeExternalUrl(deepLink)}
+                rel="noreferrer"
+                target="_blank"
+              >
                 <ExternalLink className="size-4" />
                 Open Telegram
               </a>

@@ -28,6 +28,7 @@ import {
   type AlphaWatchlistItem,
 } from "@/lib/alpha-watchlist";
 import { useWalletSession } from "@/hooks/use-wallet-session";
+import { safeExternalUrl } from "@/lib/external-url";
 import {
   clearAlphaWatchlist,
   deleteAlphaWatchlistItem,
@@ -266,7 +267,11 @@ export default function WatchlistPage() {
               <div className="flex flex-wrap gap-2">
                 {item.explorerUrl && (
                   <Button asChild size="sm" variant="outline">
-                    <a href={item.explorerUrl} rel="noreferrer" target="_blank">
+                    <a
+                      href={safeExternalUrl(item.explorerUrl)}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
                       <ExternalLinkIcon className="size-4" />
                       Open proof
                     </a>

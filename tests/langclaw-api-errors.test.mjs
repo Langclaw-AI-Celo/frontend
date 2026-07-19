@@ -11,6 +11,7 @@ import {
   deleteChatSession,
   deleteAutomationTask,
   deleteAlphaWatchlistItem,
+  deleteMemoryRecord,
   deleteManyMemoryRecords,
   getAutomationDashboard,
   getAutomationSettings,
@@ -69,6 +70,25 @@ test("chat session deletion rejects malformed mutation flags", async (t) => {
     (error) =>
       error instanceof LangclawApiError &&
       error.message === "Backend returned invalid chat session data." &&
+      error.status === 500,
+  );
+});
+
+test("memory deletion rejects malformed mutation flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, deleted: "false" });
+
+  await assert.rejects(
+    deleteMemoryRecord(walletSessionRecord(), "memory-1"),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid memory data." &&
       error.status === 500,
   );
 });

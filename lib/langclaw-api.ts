@@ -1927,7 +1927,7 @@ export async function deleteMemoryRecord(
 
   return readDeletedMemoryIds(
     response.deletedIds,
-    response.deleted ? [memoryId] : [],
+    readMemoryMutationFlag(response.deleted) ? [memoryId] : [],
   );
 }
 
@@ -3553,6 +3553,18 @@ function readDeletedMemoryIds(value: unknown, fallback: string[]) {
   }
 
   return value as string[];
+}
+
+function readMemoryMutationFlag(value: unknown) {
+  if (value === undefined) {
+    return false;
+  }
+
+  if (typeof value !== "boolean") {
+    throw invalidMemoryResponse();
+  }
+
+  return value;
 }
 
 function invalidMemoryResponse() {

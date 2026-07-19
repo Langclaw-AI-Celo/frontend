@@ -1474,7 +1474,10 @@ export async function createWalletSession(wallet: WalletAuth) {
     throw new LangclawApiError("Wallet session was not returned.", 500);
   }
 
-  if (!isWalletSession(payload.wallet)) {
+  if (
+    !isWalletSession(payload.wallet) ||
+    payload.wallet.address.toLowerCase() !== wallet.address.trim().toLowerCase()
+  ) {
     throw new LangclawApiError(
       "Backend returned invalid wallet session data.",
       500,

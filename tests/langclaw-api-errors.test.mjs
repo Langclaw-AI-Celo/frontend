@@ -247,6 +247,35 @@ test("wallet session responses reject malformed session credentials", async (t) 
   }
 });
 
+test("wallet sessions must match the authenticated account", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    message: "Sign in",
+    signature: "0xsigned",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      wallet: walletSessionRecord({
+        address: "0x2222222222222222222222222222222222222222",
+      }),
+    });
+
+  await assert.rejects(
+    createWalletSession(wallet),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid wallet session data." &&
+      error.status === 500,
+  );
+});
+
 test("automation dashboards reject malformed task, run, and settings data", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

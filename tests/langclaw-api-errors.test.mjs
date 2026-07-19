@@ -5,6 +5,7 @@ import {
   checkBackendHealth,
   LangclawApiError,
   readFriendlyError,
+  streamChat,
   streamDiscover,
 } from "../lib/langclaw-api.ts";
 
@@ -70,6 +71,164 @@ test("streaming responses reject malformed NDJSON chunks", async (t) => {
       error.message === "Backend returned an invalid streaming response." &&
       error.status === 200,
   );
+});
+
+test("streaming responses reject non-object NDJSON chunks", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const body of ["null\n", "[]\n", '"invalid"\n']) {
+    globalThis.fetch = async () =>
+      new Response(body, {
+        headers: { "Content-Type": "application/x-ndjson" },
+        status: 200,
+      });
+
+    await assert.rejects(
+      streamDiscover({ topic: "CELO" }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned an unexpected streaming response." &&
+        error.status === 200,
+    );
+  }
+});
+
+test("streaming responses reject chunks without an event type", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const body of [
+    "{}\n",
+    '{"type":null}\n',
+    '{"type":42}\n',
+    '{"type":" "}\n',
+  ]) {
+    globalThis.fetch = async () =>
+      new Response(body, {
+        headers: { "Content-Type": "application/x-ndjson" },
+        status: 200,
+      });
+
+    await assert.rejects(
+      streamDiscover({ topic: "CELO" }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned an unexpected streaming response." &&
+        error.status === 200,
+    );
+  }
+});
+
+test("streams reject unsupported event types", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    new Response('{"type":"reslt","payload":{}}\n', {
+      headers: { "Content-Type": "application/x-ndjson" },
+      status: 200,
+    });
+
+  for (const request of [
+    () => streamDiscover({ topic: "CELO" }),
+    () => streamChat({ message: "Check CELO" }),
+  ]) {
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned an unsupported streaming event." &&
+        error.status === 200,
+    );
+  }
+});
+
+test("streams reject malformed object event payloads", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const cases = [
+    [
+      () => streamDiscover({ topic: "CELO" }),
+      [
+        '{"type":"progress","event":[]}\n',
+        '{"type":"result"}\n',
+        '{"type":"result","payload":"invalid"}\n',
+      ],
+    ],
+    [
+      () => streamChat({ message: "Check CELO" }),
+      [
+        '{"type":"direct","payload":42}\n',
+        '{"type":"tool_plan","plan":null}\n',
+        '{"type":"tool_call","event":"invalid"}\n',
+        '{"type":"tool_result","event":[]}\n',
+        '{"type":"tool_final"}\n',
+        '{"type":"progress","event":false}\n',
+        '{"type":"result","payload":"invalid"}\n',
+      ],
+    ],
+  ];
+
+  for (const [request, bodies] of cases) {
+    for (const body of bodies) {
+      globalThis.fetch = async () =>
+        new Response(body, {
+          headers: { "Content-Type": "application/x-ndjson" },
+          status: 200,
+        });
+
+      await assert.rejects(
+        request(),
+        (error) =>
+          error instanceof LangclawApiError &&
+          error.message === "Backend returned an unexpected streaming response." &&
+          error.status === 200,
+      );
+    }
+  }
+});
+
+test("chat streams reject malformed scalar event payloads", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const body of [
+    '{"type":"direct_delta","delta":42}\n',
+    '{"type":"direct_reasoning_delta"}\n',
+    '{"type":"mode","mode":{}}\n',
+    '{"type":"mode","mode":" "}\n',
+  ]) {
+    globalThis.fetch = async () =>
+      new Response(body, {
+        headers: { "Content-Type": "application/x-ndjson" },
+        status: 200,
+      });
+
+    await assert.rejects(
+      streamChat({ message: "Check CELO" }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned an unexpected streaming response." &&
+        error.status === 200,
+    );
+  }
 });
 
 test("insufficient balance errors keep the currency reported by the backend", () => {

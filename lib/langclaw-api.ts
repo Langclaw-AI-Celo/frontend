@@ -1450,22 +1450,32 @@ export async function streamDiscover(input: DiscoverStreamInput) {
 
   await readNdjson<DiscoverStreamChunk>(response, (chunk) => {
     if (chunk.type === "progress") {
-      if (chunk.event) {
-        input.onProgress?.(chunk.event);
-      }
+      const event = readStreamObject<WorkflowProgressEvent>(
+        chunk.event,
+        response.status,
+      );
+      input.onProgress?.(event);
       return;
     }
 
     if (chunk.type === "result") {
-      if (chunk.payload) {
-        input.onResult?.(chunk.payload);
-      }
+      const payload = readStreamObject<DiscoverPayload>(
+        chunk.payload,
+        response.status,
+      );
+      input.onResult?.(payload);
       return;
     }
 
     if (chunk.type === "error") {
       input.onError?.(readErrorMessage(chunk.error));
+      return;
     }
+
+    throw new LangclawApiError(
+      "Backend returned an unsupported streaming event.",
+      response.status,
+    );
   });
 }
 
@@ -1489,74 +1499,95 @@ export async function streamChat(input: ChatStreamInput) {
 
   await readNdjson<ChatStreamChunk>(response, (chunk) => {
     if (chunk.type === "direct_delta") {
-      input.onDirectDelta?.(typeof chunk.delta === "string" ? chunk.delta : "");
+      const delta = readStreamString(chunk.delta, response.status);
+      input.onDirectDelta?.(delta);
       return;
     }
 
     if (chunk.type === "direct_reasoning_delta") {
-      input.onDirectReasoningDelta?.(
-        typeof chunk.delta === "string" ? chunk.delta : "",
-      );
+      const delta = readStreamString(chunk.delta, response.status);
+      input.onDirectReasoningDelta?.(delta);
       return;
     }
 
     if (chunk.type === "direct") {
-      if (chunk.payload) {
-        input.onDirect?.(chunk.payload);
-      }
+      const payload = readStreamObject<DirectChatPayload>(
+        chunk.payload,
+        response.status,
+      );
+      input.onDirect?.(payload);
       return;
     }
 
     if (chunk.type === "mode") {
-      input.onMode?.(typeof chunk.mode === "string" ? chunk.mode : "");
+      const mode = readStreamString(chunk.mode, response.status, true);
+      input.onMode?.(mode);
       return;
     }
 
     if (chunk.type === "tool_plan") {
-      if (chunk.plan) {
-        input.onToolPlan?.(chunk.plan);
-      }
+      const plan = readStreamObject<OnChainPlanSummary>(
+        chunk.plan,
+        response.status,
+      );
+      input.onToolPlan?.(plan);
       return;
     }
 
     if (chunk.type === "tool_call") {
-      if (chunk.event) {
-        input.onToolCall?.(chunk.event);
-      }
+      const event = readStreamObject<OnChainToolCallEvent>(
+        chunk.event,
+        response.status,
+      );
+      input.onToolCall?.(event);
       return;
     }
 
     if (chunk.type === "tool_result") {
-      if (chunk.event) {
-        input.onToolResult?.(chunk.event);
-      }
+      const event = readStreamObject<OnChainToolResult>(
+        chunk.event,
+        response.status,
+      );
+      input.onToolResult?.(event);
       return;
     }
 
     if (chunk.type === "tool_final") {
-      if (chunk.payload) {
-        input.onToolFinal?.(chunk.payload);
-      }
+      const payload = readStreamObject<OnChainToolFinalPayload>(
+        chunk.payload,
+        response.status,
+      );
+      input.onToolFinal?.(payload);
       return;
     }
 
     if (chunk.type === "progress") {
-      if (chunk.event) {
-        input.onProgress?.(chunk.event);
-      }
+      const event = readStreamObject<WorkflowProgressEvent>(
+        chunk.event,
+        response.status,
+      );
+      input.onProgress?.(event);
       return;
     }
 
     if (chunk.type === "result") {
-      if (chunk.payload) {
-        input.onResult?.(chunk.payload);
-      }
+      const payload = readStreamObject<DiscoverPayload>(
+        chunk.payload,
+        response.status,
+      );
+      input.onResult?.(payload);
       return;
     }
 
     if (chunk.type === "error") {
       input.onError?.(readErrorMessage(chunk.error));
+      return;
     }
+
+    throw new LangclawApiError(
+      "Backend returned an unsupported streaming event.",
+      response.status,
+    );
   });
 }
 
@@ -2591,18 +2622,67 @@ async function readNdjson<TChunk>(
 }
 
 function parseNdjsonChunk<TChunk>(value: string, status: number) {
+  let chunk: unknown;
+
   try {
-    return JSON.parse(value) as TChunk;
+    chunk = JSON.parse(value);
   } catch {
     throw new LangclawApiError(
       "Backend returned an invalid streaming response.",
       status,
     );
   }
+
+  if (!chunk || typeof chunk !== "object" || Array.isArray(chunk)) {
+    throw new LangclawApiError(
+      "Backend returned an unexpected streaming response.",
+      status,
+    );
+  }
+
+  const type = (chunk as Record<string, unknown>).type;
+
+  if (typeof type !== "string" || !type.trim()) {
+    throw new LangclawApiError(
+      "Backend returned an unexpected streaming response.",
+      status,
+    );
+  }
+
+  return chunk as TChunk;
 }
 
 function readErrorMessage(value: unknown) {
   return normalizeError(value) || "Langclaw request failed.";
+}
+
+function readStreamObject<T>(value: unknown, status: number) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new LangclawApiError(
+      "Backend returned an unexpected streaming response.",
+      status,
+    );
+  }
+
+  return value as T;
+}
+
+function readStreamString(
+  value: unknown,
+  status: number,
+  requireContent = false,
+) {
+  if (
+    typeof value !== "string" ||
+    (requireContent && value.trim().length === 0)
+  ) {
+    throw new LangclawApiError(
+      "Backend returned an unexpected streaming response.",
+      status,
+    );
+  }
+
+  return value;
 }
 
 function normalizeError(value: unknown) {

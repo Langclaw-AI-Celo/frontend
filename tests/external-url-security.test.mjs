@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { safeExternalUrl } from "../lib/external-url.ts";
+import {
+  externalUrlHostname,
+  safeExternalUrl,
+} from "../lib/external-url.ts";
 
 test("external links accept only credential-free HTTP URLs", () => {
   assert.equal(
@@ -23,4 +26,10 @@ test("external links accept only credential-free HTTP URLs", () => {
   ]) {
     assert.equal(safeExternalUrl(value), undefined, String(value));
   }
+});
+
+test("external URL hostnames tolerate malformed source data", () => {
+  assert.equal(externalUrlHostname("https://docs.celo.org/build"), "docs.celo.org");
+  assert.equal(externalUrlHostname("not a url"), undefined);
+  assert.equal(externalUrlHostname("javascript:alert(1)"), undefined);
 });

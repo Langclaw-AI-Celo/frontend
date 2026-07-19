@@ -25,3 +25,9 @@ export function safeExternalUrl(value: unknown) {
     return undefined;
   }
 }
+
+export function externalUrlHostname(value: unknown) {
+  const safeUrl = safeExternalUrl(value);
+
+  return safeUrl ? new URL(safeUrl).hostname : undefined;
+}

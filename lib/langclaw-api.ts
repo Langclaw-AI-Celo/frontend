@@ -2211,7 +2211,218 @@ export async function runStrategyBacktest(input: {
   const response = await postJson("/api/strategy/backtest", input);
   const payload = await readJsonResponse<StrategyBacktestResponse>(response);
 
+  if (!isStrategyBacktest(payload.backtest)) {
+    throw new LangclawApiError(
+      "Backend returned invalid strategy backtest data.",
+      500,
+    );
+  }
+
   return payload.backtest;
+}
+
+function isStrategyBacktest(value: unknown): value is StrategyBacktestPayload {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const backtest = value as Record<string, unknown>;
+
+  return (
+    Array.isArray(backtest.bars) &&
+    backtest.bars.every(isStrategyMarketBar) &&
+    isOptionalProductChain(backtest.chain) &&
+    isOptionalPositiveResponseInteger(backtest.chainId) &&
+    isOptionalResponseString(backtest.chainName) &&
+    Array.isArray(backtest.equityCurve) &&
+    backtest.equityCurve.every(isStrategyEquityPoint) &&
+    isValidResponseTimestamp(backtest.generatedAt) &&
+    isStrategySignal(backtest.latestSignal) &&
+    isNonEmptyResponseString(backtest.market) &&
+    isStrategyMetrics(backtest.metrics) &&
+    isNonEmptyResponseString(backtest.pairAddress) &&
+    isStrategyParams(backtest.params) &&
+    isNonEmptyResponseString(backtest.queryId) &&
+    isNonEmptyResponseString(backtest.runId) &&
+    isNonEmptyResponseString(backtest.sourceUrl) &&
+    isNonEmptyResponseString(backtest.strategyId) &&
+    isNonEmptyResponseString(backtest.title) &&
+    Array.isArray(backtest.trades) &&
+    backtest.trades.every(isStrategyTrade) &&
+    (backtest.proof === undefined || isTradingJournalProof(backtest.proof))
+  );
+}
+
+function isStrategyMarketBar(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const bar = value as Record<string, unknown>;
+
+  return (
+    isNonNegativeResponseNumber(bar.liquidityUsd) &&
+    isOptionalFiniteResponseNumber(bar.netWhaleFlowUsd) &&
+    isNonEmptyResponseString(bar.pairAddress) &&
+    isPositiveResponseNumber(bar.priceUsd) &&
+    isValidResponseTimestamp(bar.timestamp) &&
+    isOptionalNonNegativeResponseInteger(bar.txCount) &&
+    isNonNegativeResponseNumber(bar.volumeUsd)
+  );
+}
+
+function isStrategyEquityPoint(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const point = value as Record<string, unknown>;
+
+  return (
+    isNonNegativeResponseNumber(point.equityUsd) &&
+    isValidResponseTimestamp(point.timestamp)
+  );
+}
+
+function isStrategySignal(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const signal = value as Record<string, unknown>;
+
+  return (
+    ["buy", "sell", "hold", "exit"].includes(String(signal.action)) &&
+    isBoundedResponseNumber(signal.confidence, 0, 100) &&
+    isNonNegativeResponseNumber(signal.liquidityUsd) &&
+    isFiniteResponseNumber(signal.momentumBps) &&
+    isPositiveResponseNumber(signal.priceUsd) &&
+    isNonEmptyResponseString(signal.rationale) &&
+    isNonNegativeResponseNumber(signal.volumeUsd)
+  );
+}
+
+function isStrategyMetrics(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const metrics = value as Record<string, unknown>;
+
+  return (
+    isNonNegativeResponseNumber(metrics.finalEquityUsd) &&
+    isPositiveResponseNumber(metrics.initialCapitalUsd) &&
+    isNonNegativeResponseNumber(metrics.maxDrawdownBps) &&
+    isFiniteResponseNumber(metrics.totalPnlBps) &&
+    isFiniteResponseNumber(metrics.totalPnlUsd) &&
+    isNonNegativeResponseInteger(metrics.tradeCount) &&
+    isBoundedResponseNumber(metrics.winRate, 0, 100)
+  );
+}
+
+function isStrategyParams(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const params = value as Record<string, unknown>;
+
+  return [
+    params.initialCapitalUsd,
+    params.maxHoldHours,
+    params.minLiquidityUsd,
+    params.minMomentumBps,
+    params.minVolumeMultiple,
+    params.stopLossBps,
+    params.takeProfitBps,
+  ].every(isPositiveResponseNumber);
+}
+
+function isStrategyTrade(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const trade = value as Record<string, unknown>;
+
+  return (
+    isValidResponseTimestamp(trade.entryAt) &&
+    isPositiveResponseNumber(trade.entryPriceUsd) &&
+    isValidResponseTimestamp(trade.exitAt) &&
+    isPositiveResponseNumber(trade.exitPriceUsd) &&
+    isNonNegativeResponseNumber(trade.holdHours) &&
+    isFiniteResponseNumber(trade.pnlBps) &&
+    isFiniteResponseNumber(trade.pnlUsd) &&
+    isNonEmptyResponseString(trade.reason)
+  );
+}
+
+function isTradingJournalProof(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const proof = value as Record<string, unknown>;
+
+  return (
+    ["buy", "sell", "hold", "exit"].includes(String(proof.action)) &&
+    isNonEmptyResponseString(proof.agentId) &&
+    isOptionalProductChain(proof.chain) &&
+    isPositiveResponseInteger(proof.chainId) &&
+    isOptionalResponseString(proof.chainName) &&
+    isNonEmptyResponseString(proof.decisionHash) &&
+    isNonEmptyResponseString(proof.evidenceUri) &&
+    isFiniteResponseNumber(proof.pnlBps) &&
+    isNonEmptyResponseString(proof.resultHash) &&
+    ["anchored", "failed", "pending", "prepared"].includes(
+      String(proof.status),
+    ) &&
+    ["backtested", "paper-opened", "paper-closed"].includes(
+      String(proof.strategyStatus),
+    )
+  );
+}
+
+function isOptionalProductChain(value: unknown) {
+  return value === undefined || value === "celo" || value === "mantle";
+}
+
+function isFiniteResponseNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isPositiveResponseNumber(value: unknown) {
+  return isFiniteResponseNumber(value) && value > 0;
+}
+
+function isNonNegativeResponseNumber(value: unknown) {
+  return isFiniteResponseNumber(value) && value >= 0;
+}
+
+function isPositiveResponseInteger(value: unknown) {
+  return isPositiveResponseNumber(value) && Number.isInteger(value);
+}
+
+function isOptionalPositiveResponseInteger(value: unknown) {
+  return value === undefined || isPositiveResponseInteger(value);
+}
+
+function isOptionalFiniteResponseNumber(value: unknown) {
+  return value === undefined || isFiniteResponseNumber(value);
+}
+
+function isOptionalNonNegativeResponseInteger(value: unknown) {
+  return value === undefined || isNonNegativeResponseInteger(value);
+}
+
+function isBoundedResponseNumber(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+) {
+  return (
+    isFiniteResponseNumber(value) && value >= minimum && value <= maximum
+  );
 }
 
 export async function scanStrategyPairs(input: {

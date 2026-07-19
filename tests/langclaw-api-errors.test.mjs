@@ -16,6 +16,7 @@ import {
   listChatSessions,
   readFriendlyError,
   revokeApiKey,
+  runStrategyBacktest,
   setMemoryStatus,
   streamChat,
   streamDiscover,
@@ -267,6 +268,44 @@ test("watchlist responses reject malformed items and mutation flags", async (t) 
         error.status === 500,
     );
   }
+});
+
+test("strategy backtests reject malformed response records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const valid = strategyBacktestRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const backtest of [
+    undefined,
+    "invalid",
+    { ...valid, bars: "invalid" },
+    {
+      ...valid,
+      latestSignal: { ...valid.latestSignal, action: "transfer" },
+    },
+    { ...valid, metrics: { ...valid.metrics, tradeCount: "0" } },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, backtest });
+
+    await assert.rejects(
+      runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid strategy backtest data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, backtest: valid });
+  assert.deepEqual(
+    await runStrategyBacktest({ chain: "celo", queryId: "123" }),
+    valid,
+  );
 });
 
 test("streaming responses reject malformed NDJSON chunks", async (t) => {
@@ -527,6 +566,65 @@ function watchlistRecord(overrides = {}) {
     subject: "CELO",
     summary: "Verified on-chain activity increased.",
     title: "CELO activity",
+    ...overrides,
+  };
+}
+
+function strategyBacktestRecord(overrides = {}) {
+  const pairAddress = "0xeAfc4D6d4c3391Cd4Fc10c85D2f5f972d58C0dD5";
+
+  return {
+    bars: [
+      {
+        liquidityUsd: 100_000,
+        pairAddress,
+        priceUsd: 1.02,
+        timestamp: "2026-07-19T05:00:00.000Z",
+        volumeUsd: 25_000,
+      },
+    ],
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    equityCurve: [
+      { equityUsd: 10_000, timestamp: "2026-07-19T05:00:00.000Z" },
+    ],
+    generatedAt: "2026-07-19T05:01:00.000Z",
+    latestSignal: {
+      action: "hold",
+      confidence: 65,
+      liquidityUsd: 100_000,
+      momentumBps: 20,
+      priceUsd: 1.02,
+      rationale: "Momentum remains below the entry threshold.",
+      volumeUsd: 25_000,
+    },
+    market: `celo:${pairAddress}`,
+    metrics: {
+      finalEquityUsd: 10_000,
+      initialCapitalUsd: 10_000,
+      maxDrawdownBps: 0,
+      totalPnlBps: 0,
+      totalPnlUsd: 0,
+      tradeCount: 0,
+      winRate: 0,
+    },
+    pairAddress,
+    params: {
+      initialCapitalUsd: 10_000,
+      maxHoldHours: 24,
+      minLiquidityUsd: 50_000,
+      minMomentumBps: 50,
+      minVolumeMultiple: 1.1,
+      stopLossBps: 500,
+      takeProfitBps: 1_000,
+    },
+    queryId: "123",
+    runId: "bt-test",
+    sourceUrl: "https://api.dune.com/api/v1/query/123/results",
+    strategyId: "celo-liquidity-momentum-v1",
+    title: "Celo Liquidity Momentum Strategy",
+    trades: [],
     ...overrides,
   };
 }

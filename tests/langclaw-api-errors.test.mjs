@@ -727,6 +727,23 @@ test("automation runs require timestamps that match their lifecycle", async (t) 
   }
 });
 
+test("automation runs reject durations that contradict timestamps", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const run = automationRunRecord({ durationMs: 5_000 });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, runs: [run] });
+
+  await assert.rejects(
+    listAutomationRuns(walletSessionRecord()),
+    isInvalidAutomationError,
+  );
+});
+
 test("automation run responses reject reversed timestamps", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

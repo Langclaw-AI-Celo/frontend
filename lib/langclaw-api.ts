@@ -2143,6 +2143,19 @@ function hasValidAutomationRunLifecycle(value: Record<string, unknown>) {
   );
 }
 
+function hasMatchingAutomationRunDuration(value: Record<string, unknown>) {
+  if (value.durationMs === undefined) {
+    return true;
+  }
+
+  return (
+    isValidResponseTimestamp(value.startedAt) &&
+    isValidResponseTimestamp(value.completedAt) &&
+    isNonNegativeResponseInteger(value.durationMs) &&
+    value.durationMs === Date.parse(value.completedAt) - Date.parse(value.startedAt)
+  );
+}
+
 function isAutomationRun(value: unknown): value is AutomationRun {
   if (!isResponseObject(value)) {
     return false;
@@ -2168,6 +2181,7 @@ function isAutomationRun(value: unknown): value is AutomationRun {
       typeof startedAt === "string" ? startedAt : createdAt,
     ) &&
     hasValidAutomationRunLifecycle(value) &&
+    hasMatchingAutomationRunDuration(value) &&
     (value.durationMs === undefined ||
       isNonNegativeResponseInteger(value.durationMs)) &&
     isOptionalResponseString(value.error)

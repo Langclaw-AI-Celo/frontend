@@ -3572,7 +3572,9 @@ function requireMemoryStats(value: unknown) {
   if (
     ![stats.active, stats.disabled, stats.projectScoped, stats.total].every(
       (entry) => typeof entry === "number" && Number.isInteger(entry) && entry >= 0,
-    )
+    ) ||
+    (stats.active as number) + (stats.disabled as number) !== stats.total ||
+    (stats.projectScoped as number) > (stats.total as number)
   ) {
     throw invalidMemoryResponse();
   }

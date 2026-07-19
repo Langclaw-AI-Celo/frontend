@@ -752,6 +752,39 @@ test("memory responses reject malformed records, settings, stats, and IDs", asyn
   );
 });
 
+test("memory responses reject inconsistent statistics", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionToken: "test-session",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const stats of [
+    { active: 1, disabled: 0, projectScoped: 0, total: 0 },
+    { active: 0, disabled: 0, projectScoped: 1, total: 0 },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({
+        configured: true,
+        memories: [],
+        settings: memorySettings(),
+        stats,
+      });
+
+    await assert.rejects(
+      getMemoryDashboard(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid memory data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("watchlist responses reject malformed items and mutation flags", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {

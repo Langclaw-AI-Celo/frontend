@@ -2617,12 +2617,16 @@ export async function pollAutomationTelegramLink(wallet: WalletAuth) {
     status: string;
   }>(response);
 
-  if (
-    typeof payload.linked !== "boolean" ||
-    !isNonEmptyResponseString(payload.status) ||
-    (payload.settings !== undefined &&
-      !isAutomationSettings(payload.settings))
-  ) {
+  const isLinked =
+    payload.linked === true &&
+    payload.status === "linked" &&
+    isAutomationSettings(payload.settings);
+  const isPending =
+    payload.linked === false &&
+    payload.status === "pending" &&
+    payload.settings === undefined;
+
+  if (!isLinked && !isPending) {
     throw invalidAutomationResponse();
   }
 

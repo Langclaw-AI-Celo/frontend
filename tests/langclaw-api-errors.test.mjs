@@ -1027,6 +1027,33 @@ test("automation Telegram links bind commands and deep links to their code", asy
   }
 });
 
+test("automation Telegram polling requires a consistent link state", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { configured: true, linked: true, status: "linked" },
+    {
+      configured: true,
+      linked: false,
+      settings: automationSettingsRecord(),
+      status: "pending",
+    },
+    { configured: true, linked: false, status: "linked" },
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      pollAutomationTelegramLink(wallet),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation notifications reject inconsistent read state", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

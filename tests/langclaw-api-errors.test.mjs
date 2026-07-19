@@ -876,6 +876,43 @@ test("strategy run history rejects malformed response records", async (t) => {
   assert.deepEqual(await listStrategyRuns(25, "celo"), valid);
 });
 
+test("strategy mutations require configured response envelopes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, payload, message] of [
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      { backtest, configured: false },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      { configured: "true", scan: strategyScanRecord() },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      { paperTrade: strategyPaperTradeRecord() },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
 test("streaming responses reject malformed NDJSON chunks", async (t) => {
   const originalFetch = globalThis.fetch;
 

@@ -2850,7 +2850,7 @@ export async function runStrategyBacktest(input: {
   const response = await postJson("/api/strategy/backtest", input);
   const payload = await readJsonResponse<StrategyBacktestResponse>(response);
 
-  if (!isStrategyBacktest(payload.backtest)) {
+  if (payload.configured !== true || !isStrategyBacktest(payload.backtest)) {
     throw new LangclawApiError(
       "Backend returned invalid strategy backtest data.",
       500,
@@ -3072,7 +3072,7 @@ export async function scanStrategyPairs(input: {
   const response = await postJson("/api/strategy/scan-pairs", input);
   const payload = await readJsonResponse<StrategyScanResponse>(response);
 
-  if (!isStrategyScan(payload.scan)) {
+  if (payload.configured !== true || !isStrategyScan(payload.scan)) {
     throw new LangclawApiError(
       "Backend returned invalid strategy scan data.",
       500,
@@ -3133,7 +3133,10 @@ export async function openStrategyPaperTrade(input: {
   const response = await postJson("/api/strategy/paper-trade", input);
   const payload = await readJsonResponse<StrategyPaperTradeResponse>(response);
 
-  if (!isStrategyPaperTrade(payload.paperTrade)) {
+  if (
+    payload.configured !== true ||
+    !isStrategyPaperTrade(payload.paperTrade)
+  ) {
     throw new LangclawApiError(
       "Backend returned invalid strategy paper trade data.",
       500,

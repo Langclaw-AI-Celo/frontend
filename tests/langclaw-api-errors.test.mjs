@@ -820,6 +820,33 @@ test("API key responses reject inconsistent revocation state", async (t) => {
   }
 });
 
+test("API key responses reject timestamps before creation", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const key of [
+    apiKeyRecord({ lastUsedAt: "2026-07-19T04:59:00.000Z" }),
+    apiKeyRecord({
+      revokedAt: "2026-07-19T04:59:00.000Z",
+      status: "revoked",
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, keys: [key] });
+
+    await assert.rejects(
+      listApiKeys(walletSessionRecord()),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid API key data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("memory responses reject malformed records, settings, stats, and IDs", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {

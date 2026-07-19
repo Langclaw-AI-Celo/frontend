@@ -1860,18 +1860,20 @@ function isApiKeyRecord(value: unknown): value is ApiKeyRecord {
   }
 
   const key = value as Record<string, unknown>;
+  const createdAt = key.createdAt;
 
   return (
     isNonEmptyResponseString(key.id) &&
     isNonEmptyResponseString(key.name) &&
     isNonEmptyResponseString(key.maskedKey) &&
     (key.status === "active" || key.status === "revoked") &&
-    isValidResponseTimestamp(key.createdAt) &&
+    isValidResponseTimestamp(createdAt) &&
     isOptionalResponseString(key.prefix) &&
     isOptionalResponseString(key.suffix) &&
-    isOptionalResponseTimestamp(key.lastUsedAt) &&
+    isOptionalResponseTimestampAtOrAfter(key.lastUsedAt, createdAt) &&
     ((key.status === "active" && key.revokedAt === undefined) ||
-      (key.status === "revoked" && isValidResponseTimestamp(key.revokedAt)))
+      (key.status === "revoked" && isValidResponseTimestamp(key.revokedAt))) &&
+    isOptionalResponseTimestampAtOrAfter(key.revokedAt, createdAt)
   );
 }
 
@@ -1881,6 +1883,17 @@ function isOptionalResponseString(value: unknown) {
 
 function isOptionalResponseTimestamp(value: unknown) {
   return value === undefined || isValidResponseTimestamp(value);
+}
+
+function isOptionalResponseTimestampAtOrAfter(
+  value: unknown,
+  earliest: string,
+) {
+  return (
+    value === undefined ||
+    (isValidResponseTimestamp(value) &&
+      Date.parse(value) >= Date.parse(earliest))
+  );
 }
 
 function invalidApiKeyResponse() {

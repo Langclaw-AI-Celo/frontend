@@ -3,19 +3,23 @@ import test from "node:test";
 
 import {
   checkBackendHealth,
+  clearAlphaWatchlist,
   createApiKey,
+  deleteAlphaWatchlistItem,
   deleteManyMemoryRecords,
   getChatSession,
   getMemoryDashboard,
   getMemorySettings,
   LangclawApiError,
   listApiKeys,
+  listAlphaWatchlist,
   listChatSessions,
   readFriendlyError,
   revokeApiKey,
   setMemoryStatus,
   streamChat,
   streamDiscover,
+  upsertAlphaWatchlistItem,
 } from "../lib/langclaw-api.ts";
 
 test("successful responses reject invalid JSON bodies", async (t) => {
@@ -213,6 +217,56 @@ test("memory responses reject malformed records, settings, stats, and IDs", asyn
       error.message === "Backend returned invalid memory data." &&
       error.status === 500,
   );
+});
+
+test("watchlist responses reject malformed items and mutation flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    sessionToken: "test-session",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const items of ["invalid", [null], [watchlistRecord({ sourceCount: -1 })]]) {
+    globalThis.fetch = async () => Response.json({ configured: true, items });
+
+    await assert.rejects(
+      listAlphaWatchlist(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid watchlist data." &&
+        error.status === 500,
+    );
+  }
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, item: "invalid" });
+  await assert.rejects(
+    upsertAlphaWatchlistItem(wallet, watchlistRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid watchlist data." &&
+      error.status === 500,
+  );
+
+  for (const [request, responseBody] of [
+    [() => deleteAlphaWatchlistItem(wallet, "watch-1"), { deleted: "false" }],
+    [() => clearAlphaWatchlist(wallet), { cleared: 1 }],
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, ...responseBody });
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid watchlist data." &&
+        error.status === 500,
+    );
+  }
 });
 
 test("streaming responses reject malformed NDJSON chunks", async (t) => {
@@ -455,6 +509,24 @@ function memorySettings(overrides = {}) {
     projectScopedRecall: true,
     retentionDays: 365,
     updatedAt: "2026-07-19T05:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function watchlistRecord(overrides = {}) {
+  return {
+    addedAt: "2026-07-19T05:00:00.000Z",
+    caveat: "Market conditions can change.",
+    chain: "celo",
+    gapCount: 0,
+    id: "watch-1",
+    intent: "research",
+    recommendation: "Review the supporting sources.",
+    signalType: "smart-money",
+    sourceCount: 3,
+    subject: "CELO",
+    summary: "Verified on-chain activity increased.",
+    title: "CELO activity",
     ...overrides,
   };
 }

@@ -2249,7 +2249,7 @@ export async function listAlphaWatchlist(wallet: WalletAuth) {
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
-  return payload.items ?? [];
+  return requireWatchlistItems(payload.items);
 }
 
 export async function upsertAlphaWatchlistItem(
@@ -2263,8 +2263,8 @@ export async function upsertAlphaWatchlistItem(
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
-  if (!payload.item) {
-    throw new LangclawApiError("Watchlist item was not returned.", 500);
+  if (!isWatchlistItem(payload.item)) {
+    throw invalidWatchlistResponse();
   }
 
   return payload.item;
@@ -2281,7 +2281,7 @@ export async function deleteAlphaWatchlistItem(
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
-  return Boolean(payload.deleted);
+  return readWatchlistMutationFlag(payload.deleted);
 }
 
 export async function clearAlphaWatchlist(wallet: WalletAuth) {
@@ -2291,7 +2291,66 @@ export async function clearAlphaWatchlist(wallet: WalletAuth) {
   });
   const payload = await readJsonResponse<AlphaWatchlistPayload>(response);
 
-  return Boolean(payload.cleared);
+  return readWatchlistMutationFlag(payload.cleared);
+}
+
+function requireWatchlistItems(value: unknown) {
+  if (!Array.isArray(value) || !value.every(isWatchlistItem)) {
+    throw invalidWatchlistResponse();
+  }
+
+  return value as AlphaWatchlistItem[];
+}
+
+function isWatchlistItem(value: unknown): value is AlphaWatchlistItem {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const item = value as Record<string, unknown>;
+
+  return (
+    isValidResponseTimestamp(item.addedAt) &&
+    isNonEmptyResponseString(item.caveat) &&
+    isNonEmptyResponseString(item.chain) &&
+    isNonNegativeResponseInteger(item.gapCount) &&
+    isNonEmptyResponseString(item.id) &&
+    isNonEmptyResponseString(item.intent) &&
+    isNonEmptyResponseString(item.recommendation) &&
+    isNonEmptyResponseString(item.signalType) &&
+    isNonNegativeResponseInteger(item.sourceCount) &&
+    isNonEmptyResponseString(item.subject) &&
+    isNonEmptyResponseString(item.summary) &&
+    isNonEmptyResponseString(item.title) &&
+    [
+      item.agentId,
+      item.decisionHash,
+      item.decisionId,
+      item.evidenceUri,
+      item.explorerUrl,
+      item.proofTx,
+    ].every(isOptionalResponseString)
+  );
+}
+
+function isNonNegativeResponseInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function readWatchlistMutationFlag(value: unknown) {
+  if (value === undefined) {
+    return false;
+  }
+
+  if (typeof value !== "boolean") {
+    throw invalidWatchlistResponse();
+  }
+
+  return value;
+}
+
+function invalidWatchlistResponse() {
+  return new LangclawApiError("Backend returned invalid watchlist data.", 500);
 }
 
 export function dispatchChatSessionsUpdated() {

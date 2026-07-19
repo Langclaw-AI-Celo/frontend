@@ -668,6 +668,31 @@ test("automation notifications reject inconsistent read state", async (t) => {
   }
 });
 
+test("automation notifications reject reads before creation", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      notifications: [
+        automationNotificationRecord({
+          readAt: "2026-07-19T04:59:00.000Z",
+          status: "read",
+        }),
+      ],
+    });
+
+  await assert.rejects(
+    listInAppAutomationNotifications(wallet),
+    isInvalidAutomationError,
+  );
+});
+
 test("usage endpoints reject malformed balance and transaction data", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

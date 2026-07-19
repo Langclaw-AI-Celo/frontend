@@ -2124,6 +2124,8 @@ function isAutomationNotification(
     return false;
   }
 
+  const createdAt = value.createdAt;
+
   return (
     isNonEmptyResponseString(value.id) &&
     isNonEmptyResponseString(value.title) &&
@@ -2131,9 +2133,10 @@ function isAutomationNotification(
     (value.status === "unread" || value.status === "read") &&
     isOptionalResponseString(value.taskId) &&
     isOptionalResponseString(value.runId) &&
+    isValidResponseTimestamp(createdAt) &&
     ((value.status === "unread" && value.readAt === undefined) ||
       (value.status === "read" && isValidResponseTimestamp(value.readAt))) &&
-    isValidResponseTimestamp(value.createdAt)
+    isOptionalResponseTimestampAtOrAfter(value.readAt, createdAt)
   );
 }
 

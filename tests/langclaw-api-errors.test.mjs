@@ -5,6 +5,7 @@ import {
   checkBackendHealth,
   LangclawApiError,
   readFriendlyError,
+  streamDiscover,
 } from "../lib/langclaw-api.ts";
 
 test("successful responses reject invalid JSON bodies", async (t) => {
@@ -25,6 +26,28 @@ test("successful responses reject invalid JSON bodies", async (t) => {
     (error) =>
       error instanceof LangclawApiError &&
       error.message === "Backend returned an invalid JSON response." &&
+      error.status === 200,
+  );
+});
+
+test("streaming responses reject malformed NDJSON chunks", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    new Response("not-json\n", {
+      headers: { "Content-Type": "application/x-ndjson" },
+      status: 200,
+    });
+
+  await assert.rejects(
+    streamDiscover({ topic: "CELO" }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned an invalid streaming response." &&
       error.status === 200,
   );
 });

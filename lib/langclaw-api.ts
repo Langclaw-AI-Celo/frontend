@@ -2572,14 +2572,25 @@ async function readNdjson<TChunk>(
         continue;
       }
 
-      onChunk(JSON.parse(trimmed) as TChunk);
+      onChunk(parseNdjsonChunk<TChunk>(trimmed, response.status));
     }
   }
 
   const remaining = buffer.trim();
 
   if (remaining) {
-    onChunk(JSON.parse(remaining) as TChunk);
+    onChunk(parseNdjsonChunk<TChunk>(remaining, response.status));
+  }
+}
+
+function parseNdjsonChunk<TChunk>(value: string, status: number) {
+  try {
+    return JSON.parse(value) as TChunk;
+  } catch {
+    throw new LangclawApiError(
+      "Backend returned an invalid streaming response.",
+      status,
+    );
   }
 }
 

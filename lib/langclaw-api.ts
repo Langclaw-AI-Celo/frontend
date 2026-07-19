@@ -2036,6 +2036,24 @@ function isAutomationScheduleTime(value: unknown): value is string {
   );
 }
 
+function hasValidAutomationTaskDisplayStatus(
+  status: unknown,
+  displayStatus: unknown,
+) {
+  if (status === "active") {
+    return displayStatus === "Active" || displayStatus === "Running";
+  }
+
+  if (status === "paused") {
+    return displayStatus === "Paused";
+  }
+
+  return (
+    (status === "draft" || status === "archived") &&
+    displayStatus === "Draft"
+  );
+}
+
 function isAutomationTask(value: unknown): value is AutomationTask {
   if (!isResponseObject(value)) {
     return false;
@@ -2076,9 +2094,7 @@ function isAutomationTask(value: unknown): value is AutomationTask {
     ["draft", "active", "paused", "archived"].includes(
       String(value.status),
     ) &&
-    ["Draft", "Active", "Paused", "Running"].includes(
-      String(value.displayStatus),
-    ) &&
+    hasValidAutomationTaskDisplayStatus(value.status, value.displayStatus) &&
     isNonEmptyResponseString(value.triggerLabel) &&
     isValidResponseTimestamp(createdAt) &&
     isValidResponseTimestamp(updatedAt) &&

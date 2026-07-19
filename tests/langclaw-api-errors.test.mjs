@@ -545,6 +545,29 @@ test("automation tasks reject reversed timestamps", async (t) => {
   );
 });
 
+test("automation tasks reject display statuses that contradict task state", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const task of [
+    automationTaskRecord({ displayStatus: "Paused", status: "active" }),
+    automationTaskRecord({ displayStatus: "Active", status: "draft" }),
+    automationTaskRecord({ displayStatus: "Running", status: "paused" }),
+    automationTaskRecord({ displayStatus: "Active", status: "archived" }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json(automationDashboardRecord({ tasks: [task] }));
+
+    await assert.rejects(
+      getAutomationDashboard(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation tasks require consistent last-run state", async (t) => {
   const originalFetch = globalThis.fetch;
 

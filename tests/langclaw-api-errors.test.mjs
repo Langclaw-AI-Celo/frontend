@@ -948,6 +948,30 @@ test("automation notification endpoints reject malformed delivery data", async (
   );
 });
 
+test("automation email links reject expired responses", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      link: {
+        email: "te***@example.com",
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+        sent: true,
+      },
+    });
+
+  await assert.rejects(
+    requestAutomationEmailLink(wallet, "test@example.com"),
+    isInvalidAutomationError,
+  );
+});
+
 test("automation notifications reject inconsistent read state", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

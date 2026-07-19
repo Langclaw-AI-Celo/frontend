@@ -2550,7 +2550,7 @@ export async function requestAutomationEmailLink(
   if (
     !isResponseObject(payload.link) ||
     !isNonEmptyResponseString(payload.link.email) ||
-    !isValidResponseTimestamp(payload.link.expiresAt) ||
+    !isFutureResponseTimestamp(payload.link.expiresAt) ||
     typeof payload.link.sent !== "boolean"
   ) {
     throw invalidAutomationResponse();

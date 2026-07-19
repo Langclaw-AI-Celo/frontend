@@ -486,6 +486,23 @@ test("automation tasks require metadata for their trigger type", async (t) => {
   }
 });
 
+test("scheduled automation tasks require a frequency", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const task = automationTaskRecord({ scheduleFrequency: undefined });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json(automationDashboardRecord({ tasks: [task] }));
+
+  await assert.rejects(
+    getAutomationDashboard(walletSessionRecord()),
+    isInvalidAutomationError,
+  );
+});
+
 test("automation tasks reject reversed timestamps", async (t) => {
   const originalFetch = globalThis.fetch;
   const task = automationTaskRecord({

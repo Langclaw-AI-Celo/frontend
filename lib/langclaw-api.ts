@@ -2045,10 +2045,14 @@ function isAutomationTask(value: unknown): value is AutomationTask {
     isOptionalResponseString(value.prompt) &&
     isOptionalResponseString(value.model) &&
     ["schedule", "event", "webhook"].includes(String(value.triggerType)) &&
-    (value.scheduleFrequency === undefined ||
-      ["daily", "weekly", "monthly"].includes(
-        String(value.scheduleFrequency),
-      )) &&
+    (value.triggerType === "schedule"
+      ? ["daily", "weekly", "monthly"].includes(
+          String(value.scheduleFrequency),
+        )
+      : value.scheduleFrequency === undefined ||
+        ["daily", "weekly", "monthly"].includes(
+          String(value.scheduleFrequency),
+        )) &&
     isNonEmptyResponseString(value.scheduleTime) &&
     (value.scheduleWeekday === undefined ||
       isBoundedResponseInteger(value.scheduleWeekday, 0, 6)) &&

@@ -93,6 +93,25 @@ test("chat session responses reject malformed configured flags", async (t) => {
   );
 });
 
+test("API key responses reject malformed configured flags", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: 1, keys: [] });
+
+  await assert.rejects(
+    listApiKeys(walletSessionRecord()),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid API key data." &&
+      error.status === 500,
+  );
+});
+
 test("memory deletion rejects malformed mutation flags", async (t) => {
   const originalFetch = globalThis.fetch;
 

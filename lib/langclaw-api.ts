@@ -3417,11 +3417,15 @@ async function apiKeysRequest(body: {
   const response = await postJson("/api/api-keys", body);
   const payload = await readJsonResponse<ApiKeysResponse>(response);
 
-  if (!payload.configured) {
+  if (payload.configured === false) {
     throw new LangclawApiError(
       payload.error || "API keys are not configured.",
       503,
     );
+  }
+
+  if (payload.configured !== true) {
+    throw invalidApiKeyResponse();
   }
 
   if (payload.error) {

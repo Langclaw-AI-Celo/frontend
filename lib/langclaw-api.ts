@@ -2504,10 +2504,23 @@ async function postJson(path: string, body: unknown, signal?: AbortSignal) {
 }
 
 async function readJsonResponse<T>(response: Response) {
-  const payload = (await response.json().catch(() => null)) as {
+  let payload: {
     code?: unknown;
     error?: unknown;
   } | null;
+
+  try {
+    payload = (await response.json()) as typeof payload;
+  } catch {
+    if (response.ok) {
+      throw new LangclawApiError(
+        "Backend returned an invalid JSON response.",
+        response.status,
+      );
+    }
+
+    payload = null;
+  }
 
   if (!response.ok) {
     throw new LangclawApiError(
@@ -2515,6 +2528,13 @@ async function readJsonResponse<T>(response: Response) {
         `Request failed with status ${response.status}.`,
       response.status,
       typeof payload?.code === "string" ? payload.code : undefined,
+    );
+  }
+
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new LangclawApiError(
+      "Backend returned an unexpected JSON response.",
+      response.status,
     );
   }
 
@@ -2559,14 +2579,25 @@ async function readNdjson<TChunk>(
         continue;
       }
 
-      onChunk(JSON.parse(trimmed) as TChunk);
+      onChunk(parseNdjsonChunk<TChunk>(trimmed, response.status));
     }
   }
 
   const remaining = buffer.trim();
 
   if (remaining) {
-    onChunk(JSON.parse(remaining) as TChunk);
+    onChunk(parseNdjsonChunk<TChunk>(remaining, response.status));
+  }
+}
+
+function parseNdjsonChunk<TChunk>(value: string, status: number) {
+  try {
+    return JSON.parse(value) as TChunk;
+  } catch {
+    throw new LangclawApiError(
+      "Backend returned an invalid streaming response.",
+      status,
+    );
   }
 }
 

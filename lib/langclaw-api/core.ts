@@ -555,6 +555,8 @@ export async function readNdjson<TChunk>(
     assertNdjsonChunkSize(buffer, response.status);
   }
 
+  buffer += decoder.decode();
+  assertNdjsonChunkSize(buffer, response.status);
   const remaining = buffer.trim();
 
   if (remaining) {

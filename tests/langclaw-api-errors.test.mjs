@@ -1972,6 +1972,36 @@ test("streaming responses reject malformed NDJSON chunks", async (t) => {
   );
 });
 
+test("streaming responses reject incomplete UTF-8 tails", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array([0xe2]));
+          controller.close();
+        },
+      }),
+      {
+        headers: { "Content-Type": "application/x-ndjson" },
+        status: 200,
+      },
+    );
+
+  await assert.rejects(
+    streamDiscover({ topic: "CELO" }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned an invalid streaming response." &&
+      error.status === 200,
+  );
+});
+
 test("streaming responses reject oversized NDJSON chunks", async (t) => {
   const originalFetch = globalThis.fetch;
 

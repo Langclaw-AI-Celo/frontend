@@ -1,3 +1,5 @@
+import type { WalletAuth } from "./types.ts";
+
 const DEFAULT_BACKEND_URL =
   process.env.NODE_ENV === "production"
     ? "https://nanta.tech:3002"
@@ -59,6 +61,22 @@ export function isValidResponseTimestamp(value: unknown): value is string {
 
 export function isFutureResponseTimestamp(value: unknown) {
   return isValidResponseTimestamp(value) && Date.parse(value) > Date.now();
+}
+
+export function isWalletSession(value: unknown): value is WalletAuth {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const wallet = value as Record<string, unknown>;
+
+  return (
+    isEvmAddressResponse(wallet.address) &&
+    isNonEmptyResponseString(wallet.sessionToken) &&
+    isFutureResponseTimestamp(wallet.sessionExpiresAt) &&
+    isOptionalResponseString(wallet.message) &&
+    isOptionalResponseString(wallet.signature)
+  );
 }
 
 export function isOptionalResponseString(value: unknown) {

@@ -4,7 +4,7 @@ import test from "node:test";
 
 const apiDirectory = new URL("../lib/langclaw-api/", import.meta.url);
 
-const expectedModules = ["types.ts", "core.ts"];
+const expectedModules = ["types.ts", "core.ts", "auth.ts"];
 
 test("keeps Langclaw API modules present", async () => {
   for (const moduleName of expectedModules) {

@@ -545,6 +545,48 @@ test("automation tasks reject reversed timestamps", async (t) => {
   );
 });
 
+test("automation tasks reject display statuses that contradict task state", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const task of [
+    automationTaskRecord({ displayStatus: "Paused", status: "active" }),
+    automationTaskRecord({ displayStatus: "Active", status: "draft" }),
+    automationTaskRecord({ displayStatus: "Running", status: "paused" }),
+    automationTaskRecord({ displayStatus: "Active", status: "archived" }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json(automationDashboardRecord({ tasks: [task] }));
+
+    await assert.rejects(
+      getAutomationDashboard(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
+test("automation tasks reject next runs before task creation", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const task = automationTaskRecord({
+    nextRunAt: "2026-07-19T04:59:00.000Z",
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json(automationDashboardRecord({ tasks: [task] }));
+
+  await assert.rejects(
+    getAutomationDashboard(walletSessionRecord()),
+    isInvalidAutomationError,
+  );
+});
+
 test("automation tasks require consistent last-run state", async (t) => {
   const originalFetch = globalThis.fetch;
 
@@ -685,6 +727,23 @@ test("automation runs require timestamps that match their lifecycle", async (t) 
   }
 });
 
+test("automation runs reject durations that contradict timestamps", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const run = automationRunRecord({ durationMs: 5_000 });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, runs: [run] });
+
+  await assert.rejects(
+    listAutomationRuns(walletSessionRecord()),
+    isInvalidAutomationError,
+  );
+});
+
 test("automation run responses reject reversed timestamps", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();
@@ -773,6 +832,71 @@ test("verified automation channels require linked destinations", async (t) => {
   }
 });
 
+test("automation settings reject duplicate notification channels", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const settings = automationSettingsRecord({
+    notificationChannels: ["in-app", "in-app"],
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ configured: true, settings });
+
+  await assert.rejects(
+    getAutomationSettings(walletSessionRecord()),
+    isInvalidAutomationError,
+  );
+});
+
+test("automation settings reject malformed 0G limits", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const settings of [
+    automationSettingsRecord({ dailyLimit0G: "-1" }),
+    automationSettingsRecord({ monthlyCap0G: "1e3" }),
+    automationSettingsRecord({
+      lowBalanceThreshold0G: "0.1234567890123456789",
+    }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, settings });
+
+    await assert.rejects(
+      getAutomationSettings(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
+test("automation stats require complete next-run details", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const nextRun of [
+    { nextRunAt: "2026-07-20T05:00:00.000Z" },
+    { nextRunTaskName: "Daily Celo review" },
+  ]) {
+    const dashboard = automationDashboardRecord();
+    dashboard.stats = { ...dashboard.stats, ...nextRun };
+    globalThis.fetch = async () => Response.json(dashboard);
+
+    await assert.rejects(
+      getAutomationDashboard(walletSessionRecord()),
+      isInvalidAutomationError,
+    );
+  }
+});
+
 test("automation notification endpoints reject malformed delivery data", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();
@@ -822,6 +946,112 @@ test("automation notification endpoints reject malformed delivery data", async (
     pollAutomationTelegramLink(wallet),
     isInvalidAutomationError,
   );
+});
+
+test("automation email links reject expired responses", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      link: {
+        email: "te***@example.com",
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+        sent: true,
+      },
+    });
+
+  await assert.rejects(
+    requestAutomationEmailLink(wallet, "test@example.com"),
+    isInvalidAutomationError,
+  );
+});
+
+test("automation Telegram links reject expired responses", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      configured: true,
+      link: {
+        botUsername: "langclaw_bot",
+        code: "ABC123",
+        command: "/link ABC123",
+        deepLink: "https://t.me/langclaw_bot?start=ABC123",
+        expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      },
+    });
+
+  await assert.rejects(
+    createAutomationTelegramLink(wallet),
+    isInvalidAutomationError,
+  );
+});
+
+test("automation Telegram links bind commands and deep links to their code", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+  const link = {
+    botUsername: "langclaw_bot",
+    code: "ABC123",
+    command: "/link ABC123",
+    deepLink: "https://t.me/langclaw_bot?start=ABC123",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const malformedLink of [
+    { ...link, command: "/link DIFFERENT" },
+    { ...link, deepLink: "https://example.com/?start=ABC123" },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, link: malformedLink });
+
+    await assert.rejects(
+      createAutomationTelegramLink(wallet),
+      isInvalidAutomationError,
+    );
+  }
+});
+
+test("automation Telegram polling requires a consistent link state", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    { configured: true, linked: true, status: "linked" },
+    {
+      configured: true,
+      linked: false,
+      settings: automationSettingsRecord(),
+      status: "pending",
+    },
+    { configured: true, linked: false, status: "linked" },
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      pollAutomationTelegramLink(wallet),
+      isInvalidAutomationError,
+    );
+  }
 });
 
 test("automation notifications reject inconsistent read state", async (t) => {

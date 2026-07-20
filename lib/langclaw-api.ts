@@ -2036,6 +2036,24 @@ function isAutomationScheduleTime(value: unknown): value is string {
   );
 }
 
+function hasValidAutomationTaskDisplayStatus(
+  status: unknown,
+  displayStatus: unknown,
+) {
+  if (status === "active") {
+    return displayStatus === "Active" || displayStatus === "Running";
+  }
+
+  if (status === "paused") {
+    return displayStatus === "Paused";
+  }
+
+  return (
+    (status === "draft" || status === "archived") &&
+    displayStatus === "Draft"
+  );
+}
+
 function isAutomationTask(value: unknown): value is AutomationTask {
   if (!isResponseObject(value)) {
     return false;
@@ -2076,9 +2094,7 @@ function isAutomationTask(value: unknown): value is AutomationTask {
     ["draft", "active", "paused", "archived"].includes(
       String(value.status),
     ) &&
-    ["Draft", "Active", "Paused", "Running"].includes(
-      String(value.displayStatus),
-    ) &&
+    hasValidAutomationTaskDisplayStatus(value.status, value.displayStatus) &&
     isNonEmptyResponseString(value.triggerLabel) &&
     isValidResponseTimestamp(createdAt) &&
     isValidResponseTimestamp(updatedAt) &&
@@ -2087,7 +2103,7 @@ function isAutomationTask(value: unknown): value is AutomationTask {
       (isValidResponseTimestamp(lastRunAt) &&
         isAutomationRunStatus(lastRunStatus) &&
         Date.parse(lastRunAt) >= Date.parse(createdAt))) &&
-    isOptionalResponseTimestamp(value.nextRunAt) &&
+    isOptionalResponseTimestampAtOrAfter(value.nextRunAt, createdAt) &&
     isNonNegativeResponseInteger(value.consecutiveFailures) &&
     isNonNegativeResponseInteger(value.maxRetries) &&
     isPositiveResponseInteger(value.failureThreshold)
@@ -2127,6 +2143,19 @@ function hasValidAutomationRunLifecycle(value: Record<string, unknown>) {
   );
 }
 
+function hasMatchingAutomationRunDuration(value: Record<string, unknown>) {
+  if (value.durationMs === undefined) {
+    return true;
+  }
+
+  return (
+    isValidResponseTimestamp(value.startedAt) &&
+    isValidResponseTimestamp(value.completedAt) &&
+    isNonNegativeResponseInteger(value.durationMs) &&
+    value.durationMs === Date.parse(value.completedAt) - Date.parse(value.startedAt)
+  );
+}
+
 function isAutomationRun(value: unknown): value is AutomationRun {
   if (!isResponseObject(value)) {
     return false;
@@ -2152,6 +2181,7 @@ function isAutomationRun(value: unknown): value is AutomationRun {
       typeof startedAt === "string" ? startedAt : createdAt,
     ) &&
     hasValidAutomationRunLifecycle(value) &&
+    hasMatchingAutomationRunDuration(value) &&
     (value.durationMs === undefined ||
       isNonNegativeResponseInteger(value.durationMs)) &&
     isOptionalResponseString(value.error)
@@ -2192,10 +2222,16 @@ function isAutomationNotification(
   );
 }
 
+function isAutomation0GAmount(value: unknown): value is string {
+  return typeof value === "string" && /^\d+(?:\.\d{1,18})?$/.test(value);
+}
+
 function isAutomationSettings(value: unknown): value is AutomationSettings {
   if (!isResponseObject(value)) {
     return false;
   }
+
+  const notificationChannels = value.notificationChannels;
 
   return (
     ["none", "3-attempts", "5-attempts"].includes(
@@ -2204,10 +2240,11 @@ function isAutomationSettings(value: unknown): value is AutomationSettings {
     ["email", "in-app", "none"].includes(
       String(value.failureNotification),
     ) &&
-    Array.isArray(value.notificationChannels) &&
-    value.notificationChannels.every((channel) =>
+    Array.isArray(notificationChannels) &&
+    notificationChannels.every((channel) =>
       ["email", "telegram", "in-app"].includes(String(channel)),
     ) &&
+    new Set(notificationChannels).size === notificationChannels.length &&
     isOptionalResponseString(value.notificationEmail) &&
     isOptionalResponseTimestamp(value.notificationEmailLinkedAt) &&
     isOptionalResponseString(value.notificationEmailPending) &&
@@ -2215,7 +2252,7 @@ function isAutomationSettings(value: unknown): value is AutomationSettings {
     (!value.notificationEmailVerified ||
       (isNonEmptyResponseString(value.notificationEmail) &&
         isValidResponseTimestamp(value.notificationEmailLinkedAt) &&
-        value.notificationChannels.includes("email"))) &&
+        notificationChannels.includes("email"))) &&
     isOptionalResponseString(value.telegramChatId) &&
     isOptionalResponseTimestamp(value.telegramLinkedAt) &&
     isOptionalResponseString(value.telegramUsername) &&
@@ -2223,13 +2260,13 @@ function isAutomationSettings(value: unknown): value is AutomationSettings {
     (!value.telegramVerified ||
       (isNonEmptyResponseString(value.telegramChatId) &&
         isValidResponseTimestamp(value.telegramLinkedAt) &&
-        value.notificationChannels.includes("telegram"))) &&
+        notificationChannels.includes("telegram"))) &&
     typeof value.autoPauseRepeatedFailures === "boolean" &&
     typeof value.writeRunLogsToMemory === "boolean" &&
-    isNonEmptyResponseString(value.dailyLimit0G) &&
-    isNonEmptyResponseString(value.monthlyCap0G) &&
+    isAutomation0GAmount(value.dailyLimit0G) &&
+    isAutomation0GAmount(value.monthlyCap0G) &&
     ["pause", "alert", "allow"].includes(String(value.limitBehavior)) &&
-    isNonEmptyResponseString(value.lowBalanceThreshold0G) &&
+    isAutomation0GAmount(value.lowBalanceThreshold0G) &&
     ["notify", "pause", "continue"].includes(String(value.thresholdAction))
   );
 }
@@ -2238,6 +2275,9 @@ function isAutomationStats(value: unknown): value is AutomationStats {
   if (!isResponseObject(value)) {
     return false;
   }
+
+  const nextRunAt = value.nextRunAt;
+  const nextRunTaskName = value.nextRunTaskName;
 
   return (
     [
@@ -2249,8 +2289,9 @@ function isAutomationStats(value: unknown): value is AutomationStats {
       value.completedThisWeek,
     ].every(isNonNegativeResponseInteger) &&
     isBoundedResponseNumber(value.successRate, 0, 100) &&
-    isOptionalResponseTimestamp(value.nextRunAt) &&
-    isOptionalResponseString(value.nextRunTaskName)
+    ((nextRunAt === undefined && nextRunTaskName === undefined) ||
+      (isValidResponseTimestamp(nextRunAt) &&
+        isNonEmptyResponseString(nextRunTaskName)))
   );
 }
 
@@ -2509,7 +2550,7 @@ export async function requestAutomationEmailLink(
   if (
     !isResponseObject(payload.link) ||
     !isNonEmptyResponseString(payload.link.email) ||
-    !isValidResponseTimestamp(payload.link.expiresAt) ||
+    !isFutureResponseTimestamp(payload.link.expiresAt) ||
     typeof payload.link.sent !== "boolean"
   ) {
     throw invalidAutomationResponse();
@@ -2576,12 +2617,16 @@ export async function pollAutomationTelegramLink(wallet: WalletAuth) {
     status: string;
   }>(response);
 
-  if (
-    typeof payload.linked !== "boolean" ||
-    !isNonEmptyResponseString(payload.status) ||
-    (payload.settings !== undefined &&
-      !isAutomationSettings(payload.settings))
-  ) {
+  const isLinked =
+    payload.linked === true &&
+    payload.status === "linked" &&
+    isAutomationSettings(payload.settings);
+  const isPending =
+    payload.linked === false &&
+    payload.status === "pending" &&
+    payload.settings === undefined;
+
+  if (!isLinked && !isPending) {
     throw invalidAutomationResponse();
   }
 
@@ -2629,14 +2674,20 @@ function requireAutomationTelegramLink(value: unknown) {
     throw invalidAutomationResponse();
   }
 
+  const botUsername = value.botUsername;
+  const code = value.code;
+  const command = value.command;
+  const deepLink = value.deepLink;
+
   if (
-    ![
-      value.botUsername,
-      value.code,
-      value.command,
-      value.deepLink,
-    ].every(isNonEmptyResponseString) ||
-    !isValidResponseTimestamp(value.expiresAt)
+    typeof botUsername !== "string" ||
+    !/^[A-Za-z0-9_]{5,32}$/.test(botUsername) ||
+    typeof code !== "string" ||
+    !/^[A-Za-z0-9]{4,32}$/.test(code) ||
+    command !== `/link ${code}` ||
+    deepLink !==
+      `https://t.me/${botUsername}?start=${encodeURIComponent(code)}` ||
+    !isFutureResponseTimestamp(value.expiresAt)
   ) {
     throw invalidAutomationResponse();
   }

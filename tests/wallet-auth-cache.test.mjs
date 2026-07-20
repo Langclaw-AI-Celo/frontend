@@ -71,6 +71,22 @@ test("cached wallet sessions reject unusable tokens", () => {
   }
 });
 
+test("cached wallet sessions validate optional signed fields", () => {
+  const expiresAt = new Date(now + 120_000).toISOString();
+
+  for (const overrides of [
+    { message: 42 },
+    { message: "   " },
+    { signature: [] },
+    { signature: "" },
+  ]) {
+    assert.equal(
+      parseCachedWalletAuth(cachedSession(expiresAt, overrides), address, now),
+      null,
+    );
+  }
+});
+
 test("cached wallet sessions require valid EVM addresses", () => {
   const expiresAt = new Date(now + 120_000).toISOString();
 

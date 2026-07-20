@@ -22,7 +22,9 @@ export function parseCachedWalletAuth(
       typeof parsed.sessionToken !== "string" ||
       !isEvmAddress(parsed.address) ||
       !isEvmAddress(address) ||
-      !isUsableSessionToken(parsed.sessionToken)
+      !isUsableSessionToken(parsed.sessionToken) ||
+      !isOptionalNonEmptyString(parsed.message) ||
+      !isOptionalNonEmptyString(parsed.signature)
     ) {
       return null;
     }
@@ -57,4 +59,8 @@ function isUsableSessionToken(value: string) {
     value.length <= MAX_SESSION_TOKEN_CHARACTERS &&
     !/\s/.test(value)
   );
+}
+
+function isOptionalNonEmptyString(value: unknown) {
+  return value === undefined || (typeof value === "string" && Boolean(value.trim()));
 }

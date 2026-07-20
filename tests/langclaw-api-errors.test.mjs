@@ -1974,6 +1974,60 @@ test("strategy responses reject malformed journal record identifiers", async (t)
   }
 });
 
+test("strategy responses reject malformed journal proof metadata", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const paperTrade = strategyPaperTradeRecord();
+  const runs = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      {
+        configured: true,
+        paperTrade: {
+          ...paperTrade,
+          proof: { ...paperTrade.proof, journalAddress: "invalid" },
+        },
+      },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      {
+        configured: true,
+        paperTrade: {
+          ...paperTrade,
+          proof: { ...paperTrade.proof, error: 42 },
+        },
+      },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      {
+        ...runs,
+        records: [{ ...runs.records[0], txHash: "0x1234" }],
+      },
+      "Backend returned invalid strategy run data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
 test("strategy responses reject malformed EVM addresses", async (t) => {
   const originalFetch = globalThis.fetch;
   const backtest = strategyBacktestRecord();

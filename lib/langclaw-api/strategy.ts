@@ -203,7 +203,9 @@ function isTradingJournalProof(value: unknown): value is TradingJournalProof {
     isPositiveResponseInteger(proof.chainId) &&
     isOptionalResponseString(proof.chainName) &&
     isTransactionHashResponse(proof.decisionHash) &&
+    isOptionalResponseString(proof.error) &&
     isNonEmptyResponseString(proof.evidenceUri) &&
+    isOptionalEvmAddress(proof.journalAddress) &&
     isFiniteResponseNumber(proof.pnlBps) &&
     isOptionalUnsignedIntegerString(proof.recordId) &&
     isTransactionHashResponse(proof.resultHash) &&
@@ -212,7 +214,8 @@ function isTradingJournalProof(value: unknown): value is TradingJournalProof {
     ) &&
     ["backtested", "paper-opened", "paper-closed"].includes(
       String(proof.strategyStatus),
-    )
+    ) &&
+    isOptionalTransactionHash(proof.txHash)
   );
 }
 
@@ -398,7 +401,7 @@ function isStrategyRunRecord(value: unknown) {
       String(record.status),
     ) &&
     isNonEmptyResponseString(record.strategyId) &&
-    isOptionalResponseString(record.txHash)
+    isOptionalTransactionHash(record.txHash)
   );
 }
 
@@ -408,4 +411,8 @@ function isOptionalEvmAddress(value: unknown) {
 
 function isOptionalUnsignedIntegerString(value: unknown) {
   return value === undefined || isUnsignedIntegerString(value);
+}
+
+function isOptionalTransactionHash(value: unknown) {
+  return value === undefined || isTransactionHashResponse(value);
 }

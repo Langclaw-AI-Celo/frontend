@@ -2027,6 +2027,7 @@ test("chat streams reject malformed scalar event payloads", async (t) => {
     '{"type":"direct_reasoning_delta"}\n',
     '{"type":"mode","mode":{}}\n',
     '{"type":"mode","mode":" "}\n',
+    '{"type":"mode","mode":"admin"}\n',
   ]) {
     globalThis.fetch = async () =>
       new Response(body, {

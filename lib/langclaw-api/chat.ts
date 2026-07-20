@@ -80,6 +80,14 @@ export async function streamChat(input: ChatStreamInput) {
 
     if (chunk.type === "mode") {
       const mode = readStreamString(chunk.mode, response.status, true);
+
+      if (mode !== "agent") {
+        throw new LangclawApiError(
+          "Backend returned an unexpected streaming response.",
+          response.status,
+        );
+      }
+
       input.onMode?.(mode);
       return;
     }

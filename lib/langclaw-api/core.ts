@@ -4,6 +4,7 @@ const DEFAULT_BACKEND_URL =
   process.env.NODE_ENV === "production"
     ? "https://nanta.tech:3002"
     : "http://localhost:3001";
+const MAX_JSON_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_NDJSON_CHUNK_CHARACTERS = 1_048_576;
 
 export class LangclawApiError extends Error {
@@ -150,6 +151,29 @@ export function isUnsignedIntegerString(value: unknown) {
 
 export function isOptionalProductChain(value: unknown) {
   return value === undefined || value === "celo" || value === "mantle";
+}
+
+export function isConsistentProductChainResponse(
+  chain: unknown,
+  chainId: unknown,
+  chainName: unknown,
+) {
+  if (chain === undefined) {
+    return true;
+  }
+
+  const expected =
+    chain === "celo"
+      ? { chainId: 42220, chainName: "Celo" }
+      : chain === "mantle"
+        ? { chainId: 5000, chainName: "Mantle" }
+        : undefined;
+
+  return Boolean(
+    expected &&
+      (chainId === undefined || chainId === expected.chainId) &&
+      (chainName === undefined || chainName === expected.chainName),
+  );
 }
 
 export function isFiniteResponseNumber(value: unknown): value is number {
@@ -430,8 +454,12 @@ export async function readJsonResponse<T>(response: Response) {
   } | null;
 
   try {
-    payload = (await response.json()) as typeof payload;
-  } catch {
+    payload = JSON.parse(await readLimitedJsonResponseText(response)) as typeof payload;
+  } catch (error) {
+    if (error instanceof LangclawApiError) {
+      throw error;
+    }
+
     if (response.ok) {
       throw new LangclawApiError(
         "Backend returned an invalid JSON response.",
@@ -459,6 +487,50 @@ export async function readJsonResponse<T>(response: Response) {
   }
 
   return payload as T;
+}
+
+async function readLimitedJsonResponseText(response: Response) {
+  const declaredLength = response.headers.get("content-length");
+
+  if (
+    declaredLength &&
+    /^\d+$/.test(declaredLength) &&
+    Number(declaredLength) > MAX_JSON_RESPONSE_BYTES
+  ) {
+    throw oversizedJsonResponse(response.status);
+  }
+
+  if (!response.body) {
+    return "";
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let receivedBytes = 0;
+  let text = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      return text + decoder.decode();
+    }
+
+    receivedBytes += value.byteLength;
+    if (receivedBytes > MAX_JSON_RESPONSE_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      throw oversizedJsonResponse(response.status);
+    }
+
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
+function oversizedJsonResponse(status: number) {
+  return new LangclawApiError(
+    "Backend JSON response exceeded the size limit.",
+    status,
+  );
 }
 
 export async function readNdjson<TChunk>(
@@ -506,6 +578,8 @@ export async function readNdjson<TChunk>(
     assertNdjsonChunkSize(buffer, response.status);
   }
 
+  buffer += decoder.decode();
+  assertNdjsonChunkSize(buffer, response.status);
   const remaining = buffer.trim();
 
   if (remaining) {

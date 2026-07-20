@@ -187,6 +187,41 @@ test("successful responses reject invalid JSON bodies", async (t) => {
   );
 });
 
+test("JSON responses enforce declared and streamed size limits", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const oversizedResponses = [
+    () =>
+      new Response('{"ok":true,"service":"langclaw"}', {
+        headers: {
+          "Content-Length": String(5 * 1024 * 1024 + 1),
+          "Content-Type": "application/json",
+        },
+      }),
+    () =>
+      Response.json({
+        ok: true,
+        service: "x".repeat(5 * 1024 * 1024),
+      }),
+  ];
+
+  for (const response of oversizedResponses) {
+    globalThis.fetch = async () => response();
+
+    await assert.rejects(
+      checkBackendHealth(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend JSON response exceeded the size limit." &&
+        error.status === 200,
+    );
+  }
+});
+
 test("successful responses reject non-object JSON bodies", async (t) => {
   const originalFetch = globalThis.fetch;
 
@@ -1803,6 +1838,473 @@ test("strategy run history rejects malformed response records", async (t) => {
   assert.deepEqual(await listStrategyRuns(25, "celo"), valid);
 });
 
+test("strategy proofs reject malformed agent identifiers", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const paperTrade = strategyPaperTradeRecord();
+  const runs = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      {
+        configured: true,
+        paperTrade: {
+          ...paperTrade,
+          proof: { ...paperTrade.proof, agentId: "agent-133" },
+        },
+      },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      {
+        ...runs,
+        records: [{ ...runs.records[0], agentId: "-1" }],
+      },
+      "Backend returned invalid strategy run data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
+test("strategy proofs reject malformed decision and result hashes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const paperTrade = strategyPaperTradeRecord();
+  const runs = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      {
+        configured: true,
+        paperTrade: {
+          ...paperTrade,
+          proof: { ...paperTrade.proof, decisionHash: "0x1234" },
+        },
+      },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      {
+        ...runs,
+        records: [
+          { ...runs.records[0], resultHash: `0x${"g".repeat(64)}` },
+        ],
+      },
+      "Backend returned invalid strategy run data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
+test("strategy responses reject malformed journal record identifiers", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const paperTrade = strategyPaperTradeRecord();
+  const runs = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      {
+        configured: true,
+        paperTrade: {
+          ...paperTrade,
+          proof: { ...paperTrade.proof, recordId: "record-1" },
+        },
+      },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      { ...runs, nextRecordId: "-1" },
+      "Backend returned invalid strategy run data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      {
+        ...runs,
+        records: [{ ...runs.records[0], recordId: "0x1" }],
+      },
+      "Backend returned invalid strategy run data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
+test("strategy responses reject malformed journal proof metadata", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const paperTrade = strategyPaperTradeRecord();
+  const runs = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      {
+        configured: true,
+        paperTrade: {
+          ...paperTrade,
+          proof: { ...paperTrade.proof, journalAddress: "invalid" },
+        },
+      },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      {
+        configured: true,
+        paperTrade: {
+          ...paperTrade,
+          proof: { ...paperTrade.proof, error: 42 },
+        },
+      },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      {
+        ...runs,
+        records: [{ ...runs.records[0], txHash: "0x1234" }],
+      },
+      "Backend returned invalid strategy run data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
+test("strategy responses reject unsafe external URLs", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const scan = strategyScanRecord();
+  const paperTrade = strategyPaperTradeRecord();
+  const runs = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        backtest: { ...backtest, sourceUrl: "javascript:alert(1)" },
+      },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        scan: {
+          ...scan,
+          sourceUrl: "https://user:secret@api.dune.com/results",
+        },
+      },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      {
+        configured: true,
+        paperTrade: {
+          ...paperTrade,
+          proof: { ...paperTrade.proof, explorerUrl: "javascript:alert(1)" },
+        },
+      },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      {
+        ...runs,
+        records: [
+          {
+            ...runs.records[0],
+            explorerUrl: "http://attacker.example/tx/0xabc",
+          },
+        ],
+      },
+      "Backend returned invalid strategy run data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
+test("strategy responses reject mismatched product chain metadata", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const scan = strategyScanRecord();
+  const paperTrade = strategyPaperTradeRecord();
+  const runs = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      { configured: true, backtest: { ...backtest, chainId: 5000 } },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        scan: { ...scan, chain: "mantle", chainId: 5000, chainName: "Celo" },
+      },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      {
+        configured: true,
+        paperTrade: {
+          ...paperTrade,
+          chainId: 5000,
+          proof: { ...paperTrade.proof, chainId: 5000 },
+        },
+      },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      { ...runs, chainId: 5000 },
+      "Backend returned invalid strategy run data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
+test("strategy responses reject mismatched market and strategy identities", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const scan = strategyScanRecord();
+  const paperTrade = strategyPaperTradeRecord();
+  const runs = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        backtest: {
+          ...backtest,
+          market: `mantle:${backtest.pairAddress}`,
+        },
+      },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        scan: {
+          ...scan,
+          candidates: [
+            {
+              ...scan.candidates[0],
+              market: `mantle:${scan.candidates[0].pairAddress}`,
+            },
+          ],
+        },
+      },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      {
+        configured: true,
+        paperTrade: {
+          ...paperTrade,
+          strategyId: "mantle-liquidity-momentum-v1",
+        },
+      },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      {
+        ...runs,
+        records: [
+          {
+            ...runs.records[0],
+            strategyId: "mantle-liquidity-momentum-v1",
+          },
+        ],
+      },
+      "Backend returned invalid strategy run data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
+test("strategy responses reject internally inconsistent results", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const scan = strategyScanRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        backtest: {
+          ...backtest,
+          metrics: { ...backtest.metrics, tradeCount: 1 },
+        },
+      },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        backtest: {
+          ...backtest,
+          metrics: { ...backtest.metrics, initialCapitalUsd: 20_000 },
+        },
+      },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      { configured: true, scan: { ...scan, scannedPairs: 0 } },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        scan: {
+          ...scan,
+          selectedPairAddress: "0x3333333333333333333333333333333333333333",
+        },
+      },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        scan: {
+          ...scan,
+          bestBacktest: strategyBacktestRecord({
+            chain: "mantle",
+            chainId: 5000,
+            chainName: "Mantle",
+            market: `mantle:${backtest.pairAddress}`,
+            strategyId: "mantle-liquidity-momentum-v1",
+          }),
+        },
+      },
+      "Backend returned invalid strategy scan data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
 test("strategy responses reject malformed EVM addresses", async (t) => {
   const originalFetch = globalThis.fetch;
   const backtest = strategyBacktestRecord();
@@ -1927,6 +2429,36 @@ test("streaming responses reject malformed NDJSON chunks", async (t) => {
       headers: { "Content-Type": "application/x-ndjson" },
       status: 200,
     });
+
+  await assert.rejects(
+    streamDiscover({ topic: "CELO" }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned an invalid streaming response." &&
+      error.status === 200,
+  );
+});
+
+test("streaming responses reject incomplete UTF-8 tails", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array([0xe2]));
+          controller.close();
+        },
+      }),
+      {
+        headers: { "Content-Type": "application/x-ndjson" },
+        status: 200,
+      },
+    );
 
   await assert.rejects(
     streamDiscover({ topic: "CELO" }),

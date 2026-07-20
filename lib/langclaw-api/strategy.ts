@@ -1,6 +1,7 @@
 import {
   LangclawApiError,
   isBoundedResponseNumber,
+  isConsistentProductChainResponse,
   isEvmAddressResponse,
   isFiniteResponseNumber,
   isNonEmptyResponseString,
@@ -13,6 +14,8 @@ import {
   isOptionalResponseString,
   isPositiveResponseInteger,
   isPositiveResponseNumber,
+  isTransactionHashResponse,
+  isUnsignedIntegerString,
   isValidResponseTimestamp,
   postJson,
   readJsonResponse,
@@ -61,6 +64,11 @@ function isStrategyBacktest(value: unknown): value is StrategyBacktestPayload {
     isOptionalProductChain(backtest.chain) &&
     isOptionalPositiveResponseInteger(backtest.chainId) &&
     isOptionalResponseString(backtest.chainName) &&
+    isConsistentProductChainResponse(
+      backtest.chain,
+      backtest.chainId,
+      backtest.chainName,
+    ) &&
     Array.isArray(backtest.equityCurve) &&
     backtest.equityCurve.every(isStrategyEquityPoint) &&
     isValidResponseTimestamp(backtest.generatedAt) &&
@@ -71,12 +79,44 @@ function isStrategyBacktest(value: unknown): value is StrategyBacktestPayload {
     isStrategyParams(backtest.params) &&
     isNonEmptyResponseString(backtest.queryId) &&
     isNonEmptyResponseString(backtest.runId) &&
-    isNonEmptyResponseString(backtest.sourceUrl) &&
+    isExternalUrlResponse(backtest.sourceUrl) &&
     isNonEmptyResponseString(backtest.strategyId) &&
     isNonEmptyResponseString(backtest.title) &&
     Array.isArray(backtest.trades) &&
     backtest.trades.every(isStrategyTrade) &&
+    isConsistentStrategyIdentity(
+      backtest.chain,
+      backtest.pairAddress,
+      backtest.market,
+      backtest.strategyId,
+    ) &&
+    isConsistentBacktestResult(backtest) &&
     (backtest.proof === undefined || isTradingJournalProof(backtest.proof))
+  );
+}
+
+function isConsistentBacktestResult(backtest: Record<string, unknown>) {
+  const metrics = backtest.metrics;
+  const params = backtest.params;
+
+  if (
+    !metrics ||
+    typeof metrics !== "object" ||
+    Array.isArray(metrics) ||
+    !params ||
+    typeof params !== "object" ||
+    Array.isArray(params) ||
+    !Array.isArray(backtest.trades)
+  ) {
+    return false;
+  }
+
+  const metricValues = metrics as Record<string, unknown>;
+  const parameterValues = params as Record<string, unknown>;
+
+  return (
+    metricValues.tradeCount === backtest.trades.length &&
+    metricValues.initialCapitalUsd === parameterValues.initialCapitalUsd
   );
 }
 
@@ -196,20 +236,30 @@ function isTradingJournalProof(value: unknown): value is TradingJournalProof {
 
   return (
     ["buy", "sell", "hold", "exit"].includes(String(proof.action)) &&
-    isNonEmptyResponseString(proof.agentId) &&
+    isUnsignedIntegerString(proof.agentId) &&
     isOptionalProductChain(proof.chain) &&
     isPositiveResponseInteger(proof.chainId) &&
     isOptionalResponseString(proof.chainName) &&
-    isNonEmptyResponseString(proof.decisionHash) &&
+    isConsistentProductChainResponse(
+      proof.chain,
+      proof.chainId,
+      proof.chainName,
+    ) &&
+    isTransactionHashResponse(proof.decisionHash) &&
+    isOptionalResponseString(proof.error) &&
     isNonEmptyResponseString(proof.evidenceUri) &&
+    isOptionalExternalUrlResponse(proof.explorerUrl) &&
+    isOptionalEvmAddress(proof.journalAddress) &&
     isFiniteResponseNumber(proof.pnlBps) &&
-    isNonEmptyResponseString(proof.resultHash) &&
+    isOptionalUnsignedIntegerString(proof.recordId) &&
+    isTransactionHashResponse(proof.resultHash) &&
     ["anchored", "failed", "pending", "prepared"].includes(
       String(proof.status),
     ) &&
     ["backtested", "paper-opened", "paper-closed"].includes(
       String(proof.strategyStatus),
-    )
+    ) &&
+    isOptionalTransactionHash(proof.txHash)
   );
 }
 
@@ -243,17 +293,47 @@ function isStrategyScan(value: unknown): value is StrategyScanPayload {
     isOptionalProductChain(scan.chain) &&
     isOptionalPositiveResponseInteger(scan.chainId) &&
     isOptionalResponseString(scan.chainName) &&
+    isConsistentProductChainResponse(scan.chain, scan.chainId, scan.chainName) &&
     Array.isArray(scan.candidates) &&
-    scan.candidates.every(isStrategyScanCandidate) &&
+    scan.candidates.every((candidate) =>
+      isStrategyScanCandidate(candidate, scan.chain),
+    ) &&
     isValidResponseTimestamp(scan.generatedAt) &&
     isNonEmptyResponseString(scan.queryId) &&
     isNonNegativeResponseInteger(scan.scannedPairs) &&
     isEvmAddressResponse(scan.selectedPairAddress) &&
-    isNonEmptyResponseString(scan.sourceUrl)
+    isExternalUrlResponse(scan.sourceUrl) &&
+    isConsistentScanResult(scan)
   );
 }
 
-function isStrategyScanCandidate(value: unknown) {
+function isConsistentScanResult(scan: Record<string, unknown>) {
+  const bestBacktest = scan.bestBacktest;
+
+  if (
+    !bestBacktest ||
+    typeof bestBacktest !== "object" ||
+    Array.isArray(bestBacktest) ||
+    !Array.isArray(scan.candidates) ||
+    typeof scan.scannedPairs !== "number" ||
+    typeof scan.selectedPairAddress !== "string"
+  ) {
+    return false;
+  }
+
+  const best = bestBacktest as Record<string, unknown>;
+
+  return (
+    scan.scannedPairs >= scan.candidates.length &&
+    typeof best.pairAddress === "string" &&
+    scan.selectedPairAddress.toLowerCase() === best.pairAddress.toLowerCase() &&
+    (scan.chain === undefined ||
+      best.chain === undefined ||
+      scan.chain === best.chain)
+  );
+}
+
+function isStrategyScanCandidate(value: unknown, chain: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
@@ -270,7 +350,12 @@ function isStrategyScanCandidate(value: unknown) {
     isNonNegativeResponseInteger(candidate.rowCount) &&
     isFiniteResponseNumber(candidate.score) &&
     isNonEmptyResponseString(candidate.scoreReason) &&
-    isNonNegativeResponseNumber(candidate.totalVolumeUsd)
+    isNonNegativeResponseNumber(candidate.totalVolumeUsd) &&
+    isConsistentStrategyIdentity(
+      chain,
+      candidate.pairAddress,
+      candidate.market,
+    )
   );
 }
 
@@ -315,6 +400,11 @@ function isStrategyPaperTrade(
     isOptionalProductChain(paperTrade.chain) &&
     isOptionalPositiveResponseInteger(paperTrade.chainId) &&
     isOptionalResponseString(paperTrade.chainName) &&
+    isConsistentProductChainResponse(
+      paperTrade.chain,
+      paperTrade.chainId,
+      paperTrade.chainName,
+    ) &&
     isBoundedResponseNumber(paperTrade.confidence, 0, 100) &&
     isValidResponseTimestamp(paperTrade.generatedAt) &&
     isNonEmptyResponseString(paperTrade.market) &&
@@ -326,6 +416,12 @@ function isStrategyPaperTrade(
     isNonEmptyResponseString(paperTrade.referenceBacktestRunId) &&
     isNonEmptyResponseString(paperTrade.runId) &&
     isNonEmptyResponseString(paperTrade.strategyId) &&
+    isConsistentStrategyIdentity(
+      paperTrade.chain,
+      paperTrade.pairAddress,
+      paperTrade.market,
+      paperTrade.strategyId,
+    ) &&
     proof?.action === paperTrade.action &&
     (paperTrade.chain === undefined ||
       proof.chain === undefined ||
@@ -359,10 +455,11 @@ function isStrategyRuns(value: unknown): value is StrategyRunsPayload {
     isOptionalProductChain(runs.chain) &&
     isPositiveResponseInteger(runs.chainId) &&
     isOptionalResponseString(runs.chainName) &&
+    isConsistentProductChainResponse(runs.chain, runs.chainId, runs.chainName) &&
     typeof runs.configured === "boolean" &&
     isOptionalResponseString(runs.error) &&
     isOptionalEvmAddress(runs.journalAddress) &&
-    isNonEmptyResponseString(runs.nextRecordId) &&
+    isUnsignedIntegerString(runs.nextRecordId) &&
     Array.isArray(runs.records) &&
     runs.records.every(isStrategyRunRecord)
   );
@@ -377,28 +474,112 @@ function isStrategyRunRecord(value: unknown) {
 
   return (
     ["buy", "sell", "hold", "exit"].includes(String(record.action)) &&
-    isNonEmptyResponseString(record.agentId) &&
+    isUnsignedIntegerString(record.agentId) &&
     isOptionalProductChain(record.chain) &&
     isOptionalPositiveResponseInteger(record.chainId) &&
     isOptionalResponseString(record.chainName) &&
+    isConsistentProductChainResponse(
+      record.chain,
+      record.chainId,
+      record.chainName,
+    ) &&
     isValidResponseTimestamp(record.createdAt) &&
-    isNonEmptyResponseString(record.decisionHash) &&
+    isTransactionHashResponse(record.decisionHash) &&
     isNonEmptyResponseString(record.evidenceUri) &&
-    isOptionalResponseString(record.explorerUrl) &&
+    isOptionalExternalUrlResponse(record.explorerUrl) &&
     isNonEmptyResponseString(record.market) &&
     isFiniteResponseNumber(record.pnlBps) &&
-    isNonEmptyResponseString(record.recordId) &&
+    isUnsignedIntegerString(record.recordId) &&
     isEvmAddressResponse(record.recorder) &&
-    isNonEmptyResponseString(record.resultHash) &&
+    isTransactionHashResponse(record.resultHash) &&
     isNonEmptyResponseString(record.runId) &&
     ["backtested", "paper-opened", "paper-closed"].includes(
       String(record.status),
     ) &&
     isNonEmptyResponseString(record.strategyId) &&
-    isOptionalResponseString(record.txHash)
+    isConsistentStrategyIdentity(
+      record.chain,
+      undefined,
+      record.market,
+      record.strategyId,
+    ) &&
+    isOptionalTransactionHash(record.txHash)
+  );
+}
+
+function isConsistentStrategyIdentity(
+  chain: unknown,
+  pairAddress: unknown,
+  market: unknown,
+  strategyId?: unknown,
+) {
+  if (chain === undefined) {
+    return true;
+  }
+
+  if (
+    (chain !== "celo" && chain !== "mantle") ||
+    typeof market !== "string"
+  ) {
+    return false;
+  }
+
+  const marketPrefix = `${chain}:`;
+  const marketPairAddress = market.startsWith(marketPrefix)
+    ? market.slice(marketPrefix.length)
+    : undefined;
+
+  if (
+    typeof marketPairAddress !== "string" ||
+    !isEvmAddressResponse(marketPairAddress)
+  ) {
+    return false;
+  }
+
+  return (
+    (pairAddress === undefined ||
+      (typeof pairAddress === "string" &&
+        marketPairAddress.toLowerCase() === pairAddress.toLowerCase())) &&
+    (strategyId === undefined ||
+      (typeof strategyId === "string" && strategyId.startsWith(`${chain}-`)))
   );
 }
 
 function isOptionalEvmAddress(value: unknown) {
   return value === undefined || isEvmAddressResponse(value);
+}
+
+function isOptionalUnsignedIntegerString(value: unknown) {
+  return value === undefined || isUnsignedIntegerString(value);
+}
+
+function isOptionalTransactionHash(value: unknown) {
+  return value === undefined || isTransactionHashResponse(value);
+}
+
+function isExternalUrlResponse(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value.trim());
+    const isLocalHttp =
+      url.protocol === "http:" &&
+      (url.hostname === "localhost" ||
+        url.hostname === "127.0.0.1" ||
+        url.hostname === "[::1]");
+
+    return (
+      (url.protocol === "https:" || isLocalHttp) &&
+      !url.username &&
+      !url.password
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isOptionalExternalUrlResponse(value: unknown) {
+  return value === undefined || isExternalUrlResponse(value);
 }

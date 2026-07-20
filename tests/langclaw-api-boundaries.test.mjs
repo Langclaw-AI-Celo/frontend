@@ -11,6 +11,7 @@ const expectedModules = [
   "discovery.ts",
   "chat.ts",
   "api-keys.ts",
+  "memory.ts",
 ];
 
 test("keeps Langclaw API modules present", async () => {

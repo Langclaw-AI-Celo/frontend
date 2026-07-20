@@ -1,6 +1,7 @@
 import type { WalletAuth } from "./langclaw-api.ts";
 
 const SESSION_REFRESH_MARGIN_MS = 60 * 1000;
+const MAX_SESSION_LIFETIME_MS = 13 * 60 * 60 * 1000;
 const MAX_SESSION_TOKEN_CHARACTERS = 4_096;
 
 export function parseCachedWalletAuth(
@@ -34,7 +35,8 @@ export function parseCachedWalletAuth(
 
     if (
       Number.isNaN(expiresAt) ||
-      expiresAt - now <= SESSION_REFRESH_MARGIN_MS
+      expiresAt - now <= SESSION_REFRESH_MARGIN_MS ||
+      expiresAt - now > MAX_SESSION_LIFETIME_MS
     ) {
       return null;
     }

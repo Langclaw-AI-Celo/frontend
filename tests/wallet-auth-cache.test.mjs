@@ -28,6 +28,12 @@ test("cached wallet sessions expire at the one-minute refresh boundary", () => {
   }
 });
 
+test("cached wallet sessions reject implausibly long lifetimes", () => {
+  const raw = cachedSession(new Date(now + 13 * 60 * 60 * 1000 + 1).toISOString());
+
+  assert.equal(parseCachedWalletAuth(raw, address, now), null);
+});
+
 test("cached wallet sessions reject malformed or mismatched records", () => {
   assert.equal(parseCachedWalletAuth("not-json", address, now), null);
   assert.equal(parseCachedWalletAuth(null, address, now), null);

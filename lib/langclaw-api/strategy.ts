@@ -1,5 +1,3 @@
-import { safeExternalUrl } from "../external-url.ts";
-
 import {
   LangclawApiError,
   isBoundedResponseNumber,
@@ -560,7 +558,26 @@ function isOptionalTransactionHash(value: unknown) {
 }
 
 function isExternalUrlResponse(value: unknown) {
-  return safeExternalUrl(value) !== undefined;
+  if (typeof value !== "string" || !value.trim()) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value.trim());
+    const isLocalHttp =
+      url.protocol === "http:" &&
+      (url.hostname === "localhost" ||
+        url.hostname === "127.0.0.1" ||
+        url.hostname === "[::1]");
+
+    return (
+      (url.protocol === "https:" || isLocalHttp) &&
+      !url.username &&
+      !url.password
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isOptionalExternalUrlResponse(value: unknown) {

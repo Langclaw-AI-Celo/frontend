@@ -1774,6 +1774,81 @@ test("strategy run history rejects malformed response records", async (t) => {
   assert.deepEqual(await listStrategyRuns(25, "celo"), valid);
 });
 
+test("strategy responses reject malformed EVM addresses", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const scan = strategyScanRecord();
+  const paperTrade = strategyPaperTradeRecord();
+  const runs = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      { configured: true, backtest: { ...backtest, pairAddress: "invalid" } },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        backtest: {
+          ...backtest,
+          bars: [{ ...backtest.bars[0], pairAddress: "invalid" }],
+        },
+      },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      { configured: true, scan: { ...scan, selectedPairAddress: "invalid" } },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        scan: {
+          ...scan,
+          candidates: [{ ...scan.candidates[0], pairAddress: "invalid" }],
+        },
+      },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      { configured: true, paperTrade: { ...paperTrade, pairAddress: "invalid" } },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      { ...runs, journalAddress: "invalid" },
+      "Backend returned invalid strategy run data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      {
+        ...runs,
+        records: [{ ...runs.records[0], recorder: "invalid" }],
+      },
+      "Backend returned invalid strategy run data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
 test("strategy mutations require configured response envelopes", async (t) => {
   const originalFetch = globalThis.fetch;
   const backtest = strategyBacktestRecord();

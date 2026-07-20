@@ -205,6 +205,7 @@ function isTradingJournalProof(value: unknown): value is TradingJournalProof {
     isTransactionHashResponse(proof.decisionHash) &&
     isNonEmptyResponseString(proof.evidenceUri) &&
     isFiniteResponseNumber(proof.pnlBps) &&
+    isOptionalUnsignedIntegerString(proof.recordId) &&
     isTransactionHashResponse(proof.resultHash) &&
     ["anchored", "failed", "pending", "prepared"].includes(
       String(proof.status),
@@ -364,7 +365,7 @@ function isStrategyRuns(value: unknown): value is StrategyRunsPayload {
     typeof runs.configured === "boolean" &&
     isOptionalResponseString(runs.error) &&
     isOptionalEvmAddress(runs.journalAddress) &&
-    isNonEmptyResponseString(runs.nextRecordId) &&
+    isUnsignedIntegerString(runs.nextRecordId) &&
     Array.isArray(runs.records) &&
     runs.records.every(isStrategyRunRecord)
   );
@@ -389,7 +390,7 @@ function isStrategyRunRecord(value: unknown) {
     isOptionalResponseString(record.explorerUrl) &&
     isNonEmptyResponseString(record.market) &&
     isFiniteResponseNumber(record.pnlBps) &&
-    isNonEmptyResponseString(record.recordId) &&
+    isUnsignedIntegerString(record.recordId) &&
     isEvmAddressResponse(record.recorder) &&
     isTransactionHashResponse(record.resultHash) &&
     isNonEmptyResponseString(record.runId) &&
@@ -403,4 +404,8 @@ function isStrategyRunRecord(value: unknown) {
 
 function isOptionalEvmAddress(value: unknown) {
   return value === undefined || isEvmAddressResponse(value);
+}
+
+function isOptionalUnsignedIntegerString(value: unknown) {
+  return value === undefined || isUnsignedIntegerString(value);
 }

@@ -47,7 +47,13 @@ test("cached wallet sessions reject malformed or mismatched records", () => {
 test("cached wallet sessions reject unusable tokens", () => {
   const expiresAt = new Date(now + 120_000).toISOString();
 
-  for (const sessionToken of ["", "   ", "session token", "session-token\n"]) {
+  for (const sessionToken of [
+    "",
+    "   ",
+    "session token",
+    "session-token\n",
+    "x".repeat(4_097),
+  ]) {
     assert.equal(
       parseCachedWalletAuth(
         cachedSession(expiresAt, { sessionToken }),

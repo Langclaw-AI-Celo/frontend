@@ -1,6 +1,7 @@
 import type { WalletAuth } from "./langclaw-api.ts";
 
 const SESSION_REFRESH_MARGIN_MS = 60 * 1000;
+const MAX_SESSION_TOKEN_CHARACTERS = 4_096;
 
 export function parseCachedWalletAuth(
   raw: string | null,
@@ -49,5 +50,9 @@ function isEvmAddress(value: string) {
 }
 
 function isUsableSessionToken(value: string) {
-  return value.length > 0 && !/\s/.test(value);
+  return (
+    value.length > 0 &&
+    value.length <= MAX_SESSION_TOKEN_CHARACTERS &&
+    !/\s/.test(value)
+  );
 }

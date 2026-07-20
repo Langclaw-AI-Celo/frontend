@@ -187,6 +187,41 @@ test("successful responses reject invalid JSON bodies", async (t) => {
   );
 });
 
+test("JSON responses enforce declared and streamed size limits", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const oversizedResponses = [
+    () =>
+      new Response('{"ok":true,"service":"langclaw"}', {
+        headers: {
+          "Content-Length": String(5 * 1024 * 1024 + 1),
+          "Content-Type": "application/json",
+        },
+      }),
+    () =>
+      Response.json({
+        ok: true,
+        service: "x".repeat(5 * 1024 * 1024),
+      }),
+  ];
+
+  for (const response of oversizedResponses) {
+    globalThis.fetch = async () => response();
+
+    await assert.rejects(
+      checkBackendHealth(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend JSON response exceeded the size limit." &&
+        error.status === 200,
+    );
+  }
+});
+
 test("successful responses reject non-object JSON bodies", async (t) => {
   const originalFetch = globalThis.fetch;
 

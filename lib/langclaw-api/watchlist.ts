@@ -3,6 +3,8 @@ import {
   isNonEmptyResponseString,
   isNonNegativeResponseInteger,
   isOptionalResponseString,
+  isTransactionHashResponse,
+  isUnsignedIntegerString,
   isValidResponseTimestamp,
   postJson,
   readJsonResponse,
@@ -100,15 +102,21 @@ function isWatchlistItem(value: unknown): value is AlphaWatchlistItem {
     isNonEmptyResponseString(item.subject) &&
     isNonEmptyResponseString(item.summary) &&
     isNonEmptyResponseString(item.title) &&
-    [
-      item.agentId,
-      item.decisionHash,
-      item.decisionId,
-      item.evidenceUri,
-      item.explorerUrl,
-      item.proofTx,
-    ].every(isOptionalResponseString)
+    isOptionalUnsignedIntegerString(item.agentId) &&
+    isOptionalTransactionHash(item.decisionHash) &&
+    isOptionalUnsignedIntegerString(item.decisionId) &&
+    isOptionalResponseString(item.evidenceUri) &&
+    isOptionalResponseString(item.explorerUrl) &&
+    isOptionalTransactionHash(item.proofTx)
   );
+}
+
+function isOptionalUnsignedIntegerString(value: unknown) {
+  return value === undefined || isUnsignedIntegerString(value);
+}
+
+function isOptionalTransactionHash(value: unknown) {
+  return value === undefined || isTransactionHashResponse(value);
 }
 
 function readWatchlistMutationFlag(value: unknown) {

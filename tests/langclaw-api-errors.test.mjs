@@ -1563,6 +1563,35 @@ test("watchlist responses reject malformed items and mutation flags", async (t) 
   }
 });
 
+test("watchlist responses validate optional proof identities", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const overrides of [
+    { agentId: "agent-133" },
+    { decisionId: "-1" },
+    { decisionHash: "0x1234" },
+    { proofTx: `0x${"g".repeat(64)}` },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({
+        configured: true,
+        items: [watchlistRecord(overrides)],
+      });
+
+    await assert.rejects(
+      listAlphaWatchlist(walletSessionRecord()),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid watchlist data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("watchlist responses require configured envelopes", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();

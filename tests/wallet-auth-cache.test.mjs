@@ -28,6 +28,12 @@ test("cached wallet sessions expire at the one-minute refresh boundary", () => {
   }
 });
 
+test("cached wallet sessions reject implausibly long lifetimes", () => {
+  const raw = cachedSession(new Date(now + 13 * 60 * 60 * 1000 + 1).toISOString());
+
+  assert.equal(parseCachedWalletAuth(raw, address, now), null);
+});
+
 test("cached wallet sessions reject malformed or mismatched records", () => {
   assert.equal(parseCachedWalletAuth("not-json", address, now), null);
   assert.equal(parseCachedWalletAuth(null, address, now), null);
@@ -47,13 +53,35 @@ test("cached wallet sessions reject malformed or mismatched records", () => {
 test("cached wallet sessions reject unusable tokens", () => {
   const expiresAt = new Date(now + 120_000).toISOString();
 
-  for (const sessionToken of ["", "   ", "session token", "session-token\n"]) {
+  for (const sessionToken of [
+    "",
+    "   ",
+    "session token",
+    "session-token\n",
+    "x".repeat(4_097),
+  ]) {
     assert.equal(
       parseCachedWalletAuth(
         cachedSession(expiresAt, { sessionToken }),
         address,
         now,
       ),
+      null,
+    );
+  }
+});
+
+test("cached wallet sessions validate optional signed fields", () => {
+  const expiresAt = new Date(now + 120_000).toISOString();
+
+  for (const overrides of [
+    { message: 42 },
+    { message: "   " },
+    { signature: [] },
+    { signature: "" },
+  ]) {
+    assert.equal(
+      parseCachedWalletAuth(cachedSession(expiresAt, overrides), address, now),
       null,
     );
   }

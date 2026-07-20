@@ -25,6 +25,31 @@ test("API URL helpers remove trailing separators and normalize paths", (t) => {
   assert.equal(getLangclawApiUrl("/api/chat"), "https://api.example.com/api/chat");
 });
 
+test("API URL helpers reject unsafe backend origins", (t) => {
+  const previous = process.env.NEXT_PUBLIC_LANGCLAW_API_URL;
+  t.after(() => {
+    if (previous === undefined) {
+      delete process.env.NEXT_PUBLIC_LANGCLAW_API_URL;
+    } else {
+      process.env.NEXT_PUBLIC_LANGCLAW_API_URL = previous;
+    }
+  });
+
+  for (const value of [
+    "javascript:alert(1)",
+    "/relative-backend",
+    "https://user:secret@api.example.com",
+    "https://api.example.com?tenant=one",
+    "https://api.example.com#backend",
+  ]) {
+    process.env.NEXT_PUBLIC_LANGCLAW_API_URL = value;
+    assert.throws(
+      () => getLangclawApiBaseUrl(),
+      /Backend URL must be an absolute HTTP or HTTPS URL/,
+    );
+  }
+});
+
 test("friendly errors normalize authentication and configuration failures", () => {
   assert.equal(
     readFriendlyError(

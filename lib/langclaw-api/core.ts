@@ -4,6 +4,7 @@ const DEFAULT_BACKEND_URL =
   process.env.NODE_ENV === "production"
     ? "https://nanta.tech:3002"
     : "http://localhost:3001";
+const MAX_NDJSON_CHUNK_CHARACTERS = 1_048_576;
 
 export class LangclawApiError extends Error {
   code?: string;
@@ -18,10 +19,34 @@ export class LangclawApiError extends Error {
 }
 
 export function getLangclawApiBaseUrl() {
-  return (
-    process.env.NEXT_PUBLIC_LANGCLAW_API_URL?.replace(/\/+$/, "") ||
-    DEFAULT_BACKEND_URL
-  );
+  const configured = process.env.NEXT_PUBLIC_LANGCLAW_API_URL?.trim();
+
+  if (!configured) {
+    return DEFAULT_BACKEND_URL;
+  }
+
+  const candidate = configured.replace(/\/+$/, "");
+
+  try {
+    const url = new URL(candidate);
+
+    if (
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    ) {
+      throw new TypeError("Unsafe backend URL.");
+    }
+  } catch {
+    throw new LangclawApiError(
+      "Backend URL must be an absolute HTTP or HTTPS URL without credentials, query, or fragment.",
+      500,
+    );
+  }
+
+  return candidate;
 }
 
 export function getLangclawApiUrl(path: string) {
@@ -468,6 +493,7 @@ export async function readNdjson<TChunk>(
     buffer = lines.pop() ?? "";
 
     for (const line of lines) {
+      assertNdjsonChunkSize(line, response.status);
       const trimmed = line.trim();
 
       if (!trimmed) {
@@ -476,12 +502,23 @@ export async function readNdjson<TChunk>(
 
       onChunk(parseNdjsonChunk<TChunk>(trimmed, response.status));
     }
+
+    assertNdjsonChunkSize(buffer, response.status);
   }
 
   const remaining = buffer.trim();
 
   if (remaining) {
     onChunk(parseNdjsonChunk<TChunk>(remaining, response.status));
+  }
+}
+
+function assertNdjsonChunkSize(value: string, status: number) {
+  if (value.length > MAX_NDJSON_CHUNK_CHARACTERS) {
+    throw new LangclawApiError(
+      "Backend streaming response exceeded the size limit.",
+      status,
+    );
   }
 }
 

@@ -1563,6 +1563,35 @@ test("watchlist responses reject malformed items and mutation flags", async (t) 
   }
 });
 
+test("watchlist responses validate optional proof identities", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const overrides of [
+    { agentId: "agent-133" },
+    { decisionId: "-1" },
+    { decisionHash: "0x1234" },
+    { proofTx: `0x${"g".repeat(64)}` },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({
+        configured: true,
+        items: [watchlistRecord(overrides)],
+      });
+
+    await assert.rejects(
+      listAlphaWatchlist(walletSessionRecord()),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid watchlist data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("watchlist responses require configured envelopes", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = walletSessionRecord();
@@ -1774,6 +1803,81 @@ test("strategy run history rejects malformed response records", async (t) => {
   assert.deepEqual(await listStrategyRuns(25, "celo"), valid);
 });
 
+test("strategy responses reject malformed EVM addresses", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const scan = strategyScanRecord();
+  const paperTrade = strategyPaperTradeRecord();
+  const runs = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      { configured: true, backtest: { ...backtest, pairAddress: "invalid" } },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        backtest: {
+          ...backtest,
+          bars: [{ ...backtest.bars[0], pairAddress: "invalid" }],
+        },
+      },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      { configured: true, scan: { ...scan, selectedPairAddress: "invalid" } },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        scan: {
+          ...scan,
+          candidates: [{ ...scan.candidates[0], pairAddress: "invalid" }],
+        },
+      },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      { configured: true, paperTrade: { ...paperTrade, pairAddress: "invalid" } },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      { ...runs, journalAddress: "invalid" },
+      "Backend returned invalid strategy run data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      {
+        ...runs,
+        records: [{ ...runs.records[0], recorder: "invalid" }],
+      },
+      "Backend returned invalid strategy run data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
 test("strategy mutations require configured response envelopes", async (t) => {
   const originalFetch = globalThis.fetch;
   const backtest = strategyBacktestRecord();
@@ -1829,6 +1933,28 @@ test("streaming responses reject malformed NDJSON chunks", async (t) => {
     (error) =>
       error instanceof LangclawApiError &&
       error.message === "Backend returned an invalid streaming response." &&
+      error.status === 200,
+  );
+});
+
+test("streaming responses reject oversized NDJSON chunks", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    new Response("x".repeat(1_048_577), {
+      headers: { "Content-Type": "application/x-ndjson" },
+      status: 200,
+    });
+
+  await assert.rejects(
+    streamDiscover({ topic: "CELO" }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend streaming response exceeded the size limit." &&
       error.status === 200,
   );
 });
@@ -1962,6 +2088,37 @@ test("streams reject malformed object event payloads", async (t) => {
   }
 });
 
+test("chat streams validate direct response payloads", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    {},
+    { answer: 42 },
+    { answer: "Ready", source: "proxy" },
+    { answer: "Ready", modelHonored: "true" },
+    { answer: "Ready", teeVerified: "true" },
+    { answer: "Ready", usage: [] },
+  ]) {
+    globalThis.fetch = async () =>
+      new Response(`${JSON.stringify({ type: "direct", payload })}\n`, {
+        headers: { "Content-Type": "application/x-ndjson" },
+        status: 200,
+      });
+
+    await assert.rejects(
+      streamChat({ message: "Check CELO" }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned an unexpected streaming response." &&
+        error.status === 200,
+    );
+  }
+});
+
 test("chat streams reject malformed scalar event payloads", async (t) => {
   const originalFetch = globalThis.fetch;
 
@@ -1974,6 +2131,7 @@ test("chat streams reject malformed scalar event payloads", async (t) => {
     '{"type":"direct_reasoning_delta"}\n',
     '{"type":"mode","mode":{}}\n',
     '{"type":"mode","mode":" "}\n',
+    '{"type":"mode","mode":"admin"}\n',
   ]) {
     globalThis.fetch = async () =>
       new Response(body, {

@@ -1,6 +1,7 @@
 import {
   LangclawApiError,
   isBoundedResponseNumber,
+  isEvmAddressResponse,
   isFiniteResponseNumber,
   isNonEmptyResponseString,
   isNonNegativeResponseInteger,
@@ -66,7 +67,7 @@ function isStrategyBacktest(value: unknown): value is StrategyBacktestPayload {
     isStrategySignal(backtest.latestSignal) &&
     isNonEmptyResponseString(backtest.market) &&
     isStrategyMetrics(backtest.metrics) &&
-    isNonEmptyResponseString(backtest.pairAddress) &&
+    isEvmAddressResponse(backtest.pairAddress) &&
     isStrategyParams(backtest.params) &&
     isNonEmptyResponseString(backtest.queryId) &&
     isNonEmptyResponseString(backtest.runId) &&
@@ -89,7 +90,7 @@ function isStrategyMarketBar(value: unknown) {
   return (
     isNonNegativeResponseNumber(bar.liquidityUsd) &&
     isOptionalFiniteResponseNumber(bar.netWhaleFlowUsd) &&
-    isNonEmptyResponseString(bar.pairAddress) &&
+    isEvmAddressResponse(bar.pairAddress) &&
     isPositiveResponseNumber(bar.priceUsd) &&
     isValidResponseTimestamp(bar.timestamp) &&
     isOptionalNonNegativeResponseInteger(bar.txCount) &&
@@ -247,7 +248,7 @@ function isStrategyScan(value: unknown): value is StrategyScanPayload {
     isValidResponseTimestamp(scan.generatedAt) &&
     isNonEmptyResponseString(scan.queryId) &&
     isNonNegativeResponseInteger(scan.scannedPairs) &&
-    isNonEmptyResponseString(scan.selectedPairAddress) &&
+    isEvmAddressResponse(scan.selectedPairAddress) &&
     isNonEmptyResponseString(scan.sourceUrl)
   );
 }
@@ -264,7 +265,7 @@ function isStrategyScanCandidate(value: unknown) {
     isValidResponseTimestamp(candidate.latestTimestamp) &&
     isNonEmptyResponseString(candidate.market) &&
     isStrategyMetrics(candidate.metrics) &&
-    isNonEmptyResponseString(candidate.pairAddress) &&
+    isEvmAddressResponse(candidate.pairAddress) &&
     isPositiveResponseInteger(candidate.rank) &&
     isNonNegativeResponseInteger(candidate.rowCount) &&
     isFiniteResponseNumber(candidate.score) &&
@@ -318,7 +319,7 @@ function isStrategyPaperTrade(
     isValidResponseTimestamp(paperTrade.generatedAt) &&
     isNonEmptyResponseString(paperTrade.market) &&
     isPositiveResponseNumber(paperTrade.notionalUsd) &&
-    isNonEmptyResponseString(paperTrade.pairAddress) &&
+    isEvmAddressResponse(paperTrade.pairAddress) &&
     proof !== undefined &&
     isTradingJournalProof(proof) &&
     isNonEmptyResponseString(paperTrade.rationale) &&
@@ -360,7 +361,7 @@ function isStrategyRuns(value: unknown): value is StrategyRunsPayload {
     isOptionalResponseString(runs.chainName) &&
     typeof runs.configured === "boolean" &&
     isOptionalResponseString(runs.error) &&
-    isOptionalResponseString(runs.journalAddress) &&
+    isOptionalEvmAddress(runs.journalAddress) &&
     isNonEmptyResponseString(runs.nextRecordId) &&
     Array.isArray(runs.records) &&
     runs.records.every(isStrategyRunRecord)
@@ -387,7 +388,7 @@ function isStrategyRunRecord(value: unknown) {
     isNonEmptyResponseString(record.market) &&
     isFiniteResponseNumber(record.pnlBps) &&
     isNonEmptyResponseString(record.recordId) &&
-    isNonEmptyResponseString(record.recorder) &&
+    isEvmAddressResponse(record.recorder) &&
     isNonEmptyResponseString(record.resultHash) &&
     isNonEmptyResponseString(record.runId) &&
     ["backtested", "paper-opened", "paper-closed"].includes(
@@ -396,4 +397,8 @@ function isStrategyRunRecord(value: unknown) {
     isNonEmptyResponseString(record.strategyId) &&
     isOptionalResponseString(record.txHash)
   );
+}
+
+function isOptionalEvmAddress(value: unknown) {
+  return value === undefined || isEvmAddressResponse(value);
 }

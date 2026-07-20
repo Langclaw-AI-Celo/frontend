@@ -15,6 +15,7 @@ const expectedModules = [
   "automation.ts",
   "usage.ts",
   "proof.ts",
+  "strategy.ts",
 ];
 
 test("keeps Langclaw API modules present", async () => {

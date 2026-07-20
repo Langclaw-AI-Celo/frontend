@@ -92,7 +92,33 @@ function isStrategyBacktest(value: unknown): value is StrategyBacktestPayload {
       backtest.market,
       backtest.strategyId,
     ) &&
+    isConsistentBacktestResult(backtest) &&
     (backtest.proof === undefined || isTradingJournalProof(backtest.proof))
+  );
+}
+
+function isConsistentBacktestResult(backtest: Record<string, unknown>) {
+  const metrics = backtest.metrics;
+  const params = backtest.params;
+
+  if (
+    !metrics ||
+    typeof metrics !== "object" ||
+    Array.isArray(metrics) ||
+    !params ||
+    typeof params !== "object" ||
+    Array.isArray(params) ||
+    !Array.isArray(backtest.trades)
+  ) {
+    return false;
+  }
+
+  const metricValues = metrics as Record<string, unknown>;
+  const parameterValues = params as Record<string, unknown>;
+
+  return (
+    metricValues.tradeCount === backtest.trades.length &&
+    metricValues.initialCapitalUsd === parameterValues.initialCapitalUsd
   );
 }
 
@@ -278,7 +304,34 @@ function isStrategyScan(value: unknown): value is StrategyScanPayload {
     isNonEmptyResponseString(scan.queryId) &&
     isNonNegativeResponseInteger(scan.scannedPairs) &&
     isEvmAddressResponse(scan.selectedPairAddress) &&
-    isExternalUrlResponse(scan.sourceUrl)
+    isExternalUrlResponse(scan.sourceUrl) &&
+    isConsistentScanResult(scan)
+  );
+}
+
+function isConsistentScanResult(scan: Record<string, unknown>) {
+  const bestBacktest = scan.bestBacktest;
+
+  if (
+    !bestBacktest ||
+    typeof bestBacktest !== "object" ||
+    Array.isArray(bestBacktest) ||
+    !Array.isArray(scan.candidates) ||
+    typeof scan.scannedPairs !== "number" ||
+    typeof scan.selectedPairAddress !== "string"
+  ) {
+    return false;
+  }
+
+  const best = bestBacktest as Record<string, unknown>;
+
+  return (
+    scan.scannedPairs >= scan.candidates.length &&
+    typeof best.pairAddress === "string" &&
+    scan.selectedPairAddress.toLowerCase() === best.pairAddress.toLowerCase() &&
+    (scan.chain === undefined ||
+      best.chain === undefined ||
+      scan.chain === best.chain)
   );
 }
 

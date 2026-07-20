@@ -2227,6 +2227,84 @@ test("strategy responses reject mismatched market and strategy identities", asyn
   }
 });
 
+test("strategy responses reject internally inconsistent results", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const scan = strategyScanRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        backtest: {
+          ...backtest,
+          metrics: { ...backtest.metrics, tradeCount: 1 },
+        },
+      },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        backtest: {
+          ...backtest,
+          metrics: { ...backtest.metrics, initialCapitalUsd: 20_000 },
+        },
+      },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      { configured: true, scan: { ...scan, scannedPairs: 0 } },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        scan: {
+          ...scan,
+          selectedPairAddress: "0x3333333333333333333333333333333333333333",
+        },
+      },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        scan: {
+          ...scan,
+          bestBacktest: strategyBacktestRecord({
+            chain: "mantle",
+            chainId: 5000,
+            chainName: "Mantle",
+            market: `mantle:${backtest.pairAddress}`,
+            strategyId: "mantle-liquidity-momentum-v1",
+          }),
+        },
+      },
+      "Backend returned invalid strategy scan data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
 test("strategy responses reject malformed EVM addresses", async (t) => {
   const originalFetch = globalThis.fetch;
   const backtest = strategyBacktestRecord();

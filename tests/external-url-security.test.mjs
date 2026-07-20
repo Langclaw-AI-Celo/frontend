@@ -6,7 +6,7 @@ import {
   safeExternalUrl,
 } from "../lib/external-url.ts";
 
-test("external links accept only credential-free HTTP URLs", () => {
+test("external links accept HTTPS and local credential-free HTTP URLs", () => {
   assert.equal(
     safeExternalUrl(" https://explorer.celo.org/mainnet/tx/0xabc "),
     "https://explorer.celo.org/mainnet/tx/0xabc",
@@ -14,6 +14,7 @@ test("external links accept only credential-free HTTP URLs", () => {
   assert.equal(safeExternalUrl("http://localhost:3001/health"), "http://localhost:3001/health");
 
   for (const value of [
+    "http://attacker.example/path",
     "javascript:alert(document.domain)",
     "data:text/html,<script>alert(1)</script>",
     "file:///etc/passwd",

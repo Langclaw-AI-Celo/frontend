@@ -1984,6 +1984,37 @@ test("streams reject malformed object event payloads", async (t) => {
   }
 });
 
+test("chat streams validate direct response payloads", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    {},
+    { answer: 42 },
+    { answer: "Ready", source: "proxy" },
+    { answer: "Ready", modelHonored: "true" },
+    { answer: "Ready", teeVerified: "true" },
+    { answer: "Ready", usage: [] },
+  ]) {
+    globalThis.fetch = async () =>
+      new Response(`${JSON.stringify({ type: "direct", payload })}\n`, {
+        headers: { "Content-Type": "application/x-ndjson" },
+        status: 200,
+      });
+
+    await assert.rejects(
+      streamChat({ message: "Check CELO" }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned an unexpected streaming response." &&
+        error.status === 200,
+    );
+  }
+});
+
 test("chat streams reject malformed scalar event payloads", async (t) => {
   const originalFetch = globalThis.fetch;
 

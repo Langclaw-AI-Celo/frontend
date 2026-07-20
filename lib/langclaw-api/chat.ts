@@ -1,6 +1,8 @@
 import {
   LangclawApiError,
   isNonEmptyResponseString,
+  isOptionalResponseString,
+  isResponseObject,
   isValidResponseTimestamp,
   postJson,
   readErrorMessage,
@@ -71,10 +73,7 @@ export async function streamChat(input: ChatStreamInput) {
     }
 
     if (chunk.type === "direct") {
-      const payload = readStreamObject<DirectChatPayload>(
-        chunk.payload,
-        response.status,
-      );
+      const payload = readDirectChatPayload(chunk.payload, response.status);
       input.onDirect?.(payload);
       return;
     }
@@ -149,6 +148,38 @@ export async function streamChat(input: ChatStreamInput) {
       response.status,
     );
   });
+}
+
+function readDirectChatPayload(value: unknown, status: number) {
+  const payload = readStreamObject<Record<string, unknown>>(value, status);
+
+  if (
+    typeof payload.answer !== "string" ||
+    !isOptionalResponseString(payload.error) ||
+    !isOptionalResponseString(payload.fallbackFrom) ||
+    !isOptionalResponseString(payload.model) ||
+    !isOptionalResponseString(payload.requestedModel) ||
+    !isOptionalResponseString(payload.title) ||
+    !isOptionalResponseString(payload.usedModel) ||
+    (payload.modelHonored !== undefined &&
+      typeof payload.modelHonored !== "boolean") ||
+    (payload.source !== undefined &&
+      payload.source !== "openai" &&
+      payload.source !== "fallback") ||
+    (payload.teeVerified !== undefined &&
+      payload.teeVerified !== null &&
+      typeof payload.teeVerified !== "boolean") ||
+    (payload.teeVerification !== undefined &&
+      !isResponseObject(payload.teeVerification)) ||
+    (payload.usage !== undefined && !isResponseObject(payload.usage))
+  ) {
+    throw new LangclawApiError(
+      "Backend returned an unexpected streaming response.",
+      status,
+    );
+  }
+
+  return payload as DirectChatPayload;
 }
 
 export async function listChatSessions(wallet: WalletAuth) {

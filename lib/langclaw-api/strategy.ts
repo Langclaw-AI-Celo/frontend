@@ -3,6 +3,7 @@ import { safeExternalUrl } from "../external-url.ts";
 import {
   LangclawApiError,
   isBoundedResponseNumber,
+  isConsistentProductChainResponse,
   isEvmAddressResponse,
   isFiniteResponseNumber,
   isNonEmptyResponseString,
@@ -65,6 +66,11 @@ function isStrategyBacktest(value: unknown): value is StrategyBacktestPayload {
     isOptionalProductChain(backtest.chain) &&
     isOptionalPositiveResponseInteger(backtest.chainId) &&
     isOptionalResponseString(backtest.chainName) &&
+    isConsistentProductChainResponse(
+      backtest.chain,
+      backtest.chainId,
+      backtest.chainName,
+    ) &&
     Array.isArray(backtest.equityCurve) &&
     backtest.equityCurve.every(isStrategyEquityPoint) &&
     isValidResponseTimestamp(backtest.generatedAt) &&
@@ -204,6 +210,11 @@ function isTradingJournalProof(value: unknown): value is TradingJournalProof {
     isOptionalProductChain(proof.chain) &&
     isPositiveResponseInteger(proof.chainId) &&
     isOptionalResponseString(proof.chainName) &&
+    isConsistentProductChainResponse(
+      proof.chain,
+      proof.chainId,
+      proof.chainName,
+    ) &&
     isTransactionHashResponse(proof.decisionHash) &&
     isOptionalResponseString(proof.error) &&
     isNonEmptyResponseString(proof.evidenceUri) &&
@@ -252,6 +263,7 @@ function isStrategyScan(value: unknown): value is StrategyScanPayload {
     isOptionalProductChain(scan.chain) &&
     isOptionalPositiveResponseInteger(scan.chainId) &&
     isOptionalResponseString(scan.chainName) &&
+    isConsistentProductChainResponse(scan.chain, scan.chainId, scan.chainName) &&
     Array.isArray(scan.candidates) &&
     scan.candidates.every(isStrategyScanCandidate) &&
     isValidResponseTimestamp(scan.generatedAt) &&
@@ -324,6 +336,11 @@ function isStrategyPaperTrade(
     isOptionalProductChain(paperTrade.chain) &&
     isOptionalPositiveResponseInteger(paperTrade.chainId) &&
     isOptionalResponseString(paperTrade.chainName) &&
+    isConsistentProductChainResponse(
+      paperTrade.chain,
+      paperTrade.chainId,
+      paperTrade.chainName,
+    ) &&
     isBoundedResponseNumber(paperTrade.confidence, 0, 100) &&
     isValidResponseTimestamp(paperTrade.generatedAt) &&
     isNonEmptyResponseString(paperTrade.market) &&
@@ -368,6 +385,7 @@ function isStrategyRuns(value: unknown): value is StrategyRunsPayload {
     isOptionalProductChain(runs.chain) &&
     isPositiveResponseInteger(runs.chainId) &&
     isOptionalResponseString(runs.chainName) &&
+    isConsistentProductChainResponse(runs.chain, runs.chainId, runs.chainName) &&
     typeof runs.configured === "boolean" &&
     isOptionalResponseString(runs.error) &&
     isOptionalEvmAddress(runs.journalAddress) &&
@@ -390,6 +408,11 @@ function isStrategyRunRecord(value: unknown) {
     isOptionalProductChain(record.chain) &&
     isOptionalPositiveResponseInteger(record.chainId) &&
     isOptionalResponseString(record.chainName) &&
+    isConsistentProductChainResponse(
+      record.chain,
+      record.chainId,
+      record.chainName,
+    ) &&
     isValidResponseTimestamp(record.createdAt) &&
     isTransactionHashResponse(record.decisionHash) &&
     isNonEmptyResponseString(record.evidenceUri) &&

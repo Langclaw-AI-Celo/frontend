@@ -2096,6 +2096,61 @@ test("strategy responses reject unsafe external URLs", async (t) => {
   }
 });
 
+test("strategy responses reject mismatched product chain metadata", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const backtest = strategyBacktestRecord();
+  const scan = strategyScanRecord();
+  const paperTrade = strategyPaperTradeRecord();
+  const runs = strategyRunsRecord();
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [request, responseBody, message] of [
+    [
+      () => runStrategyBacktest({ chain: "celo", queryId: "123" }),
+      { configured: true, backtest: { ...backtest, chainId: 5000 } },
+      "Backend returned invalid strategy backtest data.",
+    ],
+    [
+      () => scanStrategyPairs({ chain: "celo", queryId: "123" }),
+      {
+        configured: true,
+        scan: { ...scan, chain: "mantle", chainId: 5000, chainName: "Celo" },
+      },
+      "Backend returned invalid strategy scan data.",
+    ],
+    [
+      () => openStrategyPaperTrade({ backtest, chain: "celo" }),
+      {
+        configured: true,
+        paperTrade: {
+          ...paperTrade,
+          chainId: 5000,
+          proof: { ...paperTrade.proof, chainId: 5000 },
+        },
+      },
+      "Backend returned invalid strategy paper trade data.",
+    ],
+    [
+      () => listStrategyRuns(25, "celo"),
+      { ...runs, chainId: 5000 },
+      "Backend returned invalid strategy run data.",
+    ],
+  ]) {
+    globalThis.fetch = async () => Response.json(responseBody);
+
+    await assert.rejects(
+      request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === message &&
+        error.status === 500,
+    );
+  }
+});
+
 test("strategy responses reject malformed EVM addresses", async (t) => {
   const originalFetch = globalThis.fetch;
   const backtest = strategyBacktestRecord();

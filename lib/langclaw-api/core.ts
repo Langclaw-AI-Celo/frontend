@@ -153,6 +153,29 @@ export function isOptionalProductChain(value: unknown) {
   return value === undefined || value === "celo" || value === "mantle";
 }
 
+export function isConsistentProductChainResponse(
+  chain: unknown,
+  chainId: unknown,
+  chainName: unknown,
+) {
+  if (chain === undefined) {
+    return true;
+  }
+
+  const expected =
+    chain === "celo"
+      ? { chainId: 42220, chainName: "Celo" }
+      : chain === "mantle"
+        ? { chainId: 5000, chainName: "Mantle" }
+        : undefined;
+
+  return Boolean(
+    expected &&
+      (chainId === undefined || chainId === expected.chainId) &&
+      (chainName === undefined || chainName === expected.chainName),
+  );
+}
+
 export function isFiniteResponseNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }

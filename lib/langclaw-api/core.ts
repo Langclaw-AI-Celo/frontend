@@ -4,6 +4,7 @@ const DEFAULT_BACKEND_URL =
   process.env.NODE_ENV === "production"
     ? "https://nanta.tech:3002"
     : "http://localhost:3001";
+const MAX_NDJSON_CHUNK_CHARACTERS = 1_048_576;
 
 export class LangclawApiError extends Error {
   code?: string;
@@ -492,6 +493,7 @@ export async function readNdjson<TChunk>(
     buffer = lines.pop() ?? "";
 
     for (const line of lines) {
+      assertNdjsonChunkSize(line, response.status);
       const trimmed = line.trim();
 
       if (!trimmed) {
@@ -500,12 +502,23 @@ export async function readNdjson<TChunk>(
 
       onChunk(parseNdjsonChunk<TChunk>(trimmed, response.status));
     }
+
+    assertNdjsonChunkSize(buffer, response.status);
   }
 
   const remaining = buffer.trim();
 
   if (remaining) {
     onChunk(parseNdjsonChunk<TChunk>(remaining, response.status));
+  }
+}
+
+function assertNdjsonChunkSize(value: string, status: number) {
+  if (value.length > MAX_NDJSON_CHUNK_CHARACTERS) {
+    throw new LangclawApiError(
+      "Backend streaming response exceeded the size limit.",
+      status,
+    );
   }
 }
 

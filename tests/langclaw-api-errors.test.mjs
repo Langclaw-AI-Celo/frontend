@@ -1833,6 +1833,28 @@ test("streaming responses reject malformed NDJSON chunks", async (t) => {
   );
 });
 
+test("streaming responses reject oversized NDJSON chunks", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    new Response("x".repeat(1_048_577), {
+      headers: { "Content-Type": "application/x-ndjson" },
+      status: 200,
+    });
+
+  await assert.rejects(
+    streamDiscover({ topic: "CELO" }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend streaming response exceeded the size limit." &&
+      error.status === 200,
+  );
+});
+
 test("streaming responses reject non-object NDJSON chunks", async (t) => {
   const originalFetch = globalThis.fetch;
 

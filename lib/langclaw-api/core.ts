@@ -51,6 +51,10 @@ export function isEvmAddressResponse(value: unknown) {
   return typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
 }
 
+export function isTransactionHashResponse(value: unknown) {
+  return typeof value === "string" && /^0x[a-fA-F0-9]{64}$/.test(value);
+}
+
 export function isValidResponseTimestamp(value: unknown): value is string {
   return (
     typeof value === "string" &&

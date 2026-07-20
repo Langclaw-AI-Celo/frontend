@@ -13,6 +13,7 @@ const expectedModules = [
   "api-keys.ts",
   "memory.ts",
   "automation.ts",
+  "usage.ts",
 ];
 
 test("keeps Langclaw API modules present", async () => {

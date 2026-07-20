@@ -13,6 +13,7 @@ import {
   isOptionalResponseString,
   isPositiveResponseInteger,
   isPositiveResponseNumber,
+  isUnsignedIntegerString,
   isValidResponseTimestamp,
   postJson,
   readJsonResponse,
@@ -196,7 +197,7 @@ function isTradingJournalProof(value: unknown): value is TradingJournalProof {
 
   return (
     ["buy", "sell", "hold", "exit"].includes(String(proof.action)) &&
-    isNonEmptyResponseString(proof.agentId) &&
+    isUnsignedIntegerString(proof.agentId) &&
     isOptionalProductChain(proof.chain) &&
     isPositiveResponseInteger(proof.chainId) &&
     isOptionalResponseString(proof.chainName) &&
@@ -377,7 +378,7 @@ function isStrategyRunRecord(value: unknown) {
 
   return (
     ["buy", "sell", "hold", "exit"].includes(String(record.action)) &&
-    isNonEmptyResponseString(record.agentId) &&
+    isUnsignedIntegerString(record.agentId) &&
     isOptionalProductChain(record.chain) &&
     isOptionalPositiveResponseInteger(record.chainId) &&
     isOptionalResponseString(record.chainName) &&

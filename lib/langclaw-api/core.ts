@@ -18,10 +18,34 @@ export class LangclawApiError extends Error {
 }
 
 export function getLangclawApiBaseUrl() {
-  return (
-    process.env.NEXT_PUBLIC_LANGCLAW_API_URL?.replace(/\/+$/, "") ||
-    DEFAULT_BACKEND_URL
-  );
+  const configured = process.env.NEXT_PUBLIC_LANGCLAW_API_URL?.trim();
+
+  if (!configured) {
+    return DEFAULT_BACKEND_URL;
+  }
+
+  const candidate = configured.replace(/\/+$/, "");
+
+  try {
+    const url = new URL(candidate);
+
+    if (
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    ) {
+      throw new TypeError("Unsafe backend URL.");
+    }
+  } catch {
+    throw new LangclawApiError(
+      "Backend URL must be an absolute HTTP or HTTPS URL without credentials, query, or fragment.",
+      500,
+    );
+  }
+
+  return candidate;
 }
 
 export function getLangclawApiUrl(path: string) {

@@ -7,7 +7,10 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendRoot = path.resolve(testDir, "..");
 const walletSessionPath = path.join(frontendRoot, "hooks/use-wallet-session.ts");
-const langclawApiPath = path.join(frontendRoot, "lib/langclaw-api.ts");
+const langclawApiCorePath = path.join(
+  frontendRoot,
+  "lib/langclaw-api/core.ts",
+);
 const miniPayPath = path.join(frontendRoot, "lib/minipay.ts");
 const web3ProviderPath = path.join(frontendRoot, "lib/Web3Provider.tsx");
 const envExamplePath = path.join(frontendRoot, ".env.example");
@@ -47,7 +50,7 @@ test("RainbowKit WalletConnect project id is environment configured", () => {
 });
 
 test("MiniPay session errors point users to credit verification", () => {
-  const source = readFileSync(langclawApiPath, "utf8");
+  const source = readFileSync(langclawApiCorePath, "utf8");
 
   assert.match(
     source,
@@ -63,7 +66,7 @@ test("MiniPay session errors point users to credit verification", () => {
 
 test("MiniPay signature-only actions explain the browser-wallet fallback", () => {
   const source = readFileSync(walletSessionPath, "utf8");
-  const apiSource = readFileSync(langclawApiPath, "utf8");
+  const apiSource = readFileSync(langclawApiCorePath, "utf8");
 
   assert.ok(
     source.includes("MINIPAY_SIGNATURE_UNAVAILABLE_MESSAGE"),

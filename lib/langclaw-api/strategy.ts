@@ -1,3 +1,5 @@
+import { safeExternalUrl } from "../external-url.ts";
+
 import {
   LangclawApiError,
   isBoundedResponseNumber,
@@ -73,7 +75,7 @@ function isStrategyBacktest(value: unknown): value is StrategyBacktestPayload {
     isStrategyParams(backtest.params) &&
     isNonEmptyResponseString(backtest.queryId) &&
     isNonEmptyResponseString(backtest.runId) &&
-    isNonEmptyResponseString(backtest.sourceUrl) &&
+    isExternalUrlResponse(backtest.sourceUrl) &&
     isNonEmptyResponseString(backtest.strategyId) &&
     isNonEmptyResponseString(backtest.title) &&
     Array.isArray(backtest.trades) &&
@@ -205,6 +207,7 @@ function isTradingJournalProof(value: unknown): value is TradingJournalProof {
     isTransactionHashResponse(proof.decisionHash) &&
     isOptionalResponseString(proof.error) &&
     isNonEmptyResponseString(proof.evidenceUri) &&
+    isOptionalExternalUrlResponse(proof.explorerUrl) &&
     isOptionalEvmAddress(proof.journalAddress) &&
     isFiniteResponseNumber(proof.pnlBps) &&
     isOptionalUnsignedIntegerString(proof.recordId) &&
@@ -255,7 +258,7 @@ function isStrategyScan(value: unknown): value is StrategyScanPayload {
     isNonEmptyResponseString(scan.queryId) &&
     isNonNegativeResponseInteger(scan.scannedPairs) &&
     isEvmAddressResponse(scan.selectedPairAddress) &&
-    isNonEmptyResponseString(scan.sourceUrl)
+    isExternalUrlResponse(scan.sourceUrl)
   );
 }
 
@@ -390,7 +393,7 @@ function isStrategyRunRecord(value: unknown) {
     isValidResponseTimestamp(record.createdAt) &&
     isTransactionHashResponse(record.decisionHash) &&
     isNonEmptyResponseString(record.evidenceUri) &&
-    isOptionalResponseString(record.explorerUrl) &&
+    isOptionalExternalUrlResponse(record.explorerUrl) &&
     isNonEmptyResponseString(record.market) &&
     isFiniteResponseNumber(record.pnlBps) &&
     isUnsignedIntegerString(record.recordId) &&
@@ -415,4 +418,12 @@ function isOptionalUnsignedIntegerString(value: unknown) {
 
 function isOptionalTransactionHash(value: unknown) {
   return value === undefined || isTransactionHashResponse(value);
+}
+
+function isExternalUrlResponse(value: unknown) {
+  return safeExternalUrl(value) !== undefined;
+}
+
+function isOptionalExternalUrlResponse(value: unknown) {
+  return value === undefined || isExternalUrlResponse(value);
 }

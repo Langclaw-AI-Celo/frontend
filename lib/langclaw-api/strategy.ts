@@ -13,6 +13,7 @@ import {
   isOptionalResponseString,
   isPositiveResponseInteger,
   isPositiveResponseNumber,
+  isTransactionHashResponse,
   isUnsignedIntegerString,
   isValidResponseTimestamp,
   postJson,
@@ -201,10 +202,10 @@ function isTradingJournalProof(value: unknown): value is TradingJournalProof {
     isOptionalProductChain(proof.chain) &&
     isPositiveResponseInteger(proof.chainId) &&
     isOptionalResponseString(proof.chainName) &&
-    isNonEmptyResponseString(proof.decisionHash) &&
+    isTransactionHashResponse(proof.decisionHash) &&
     isNonEmptyResponseString(proof.evidenceUri) &&
     isFiniteResponseNumber(proof.pnlBps) &&
-    isNonEmptyResponseString(proof.resultHash) &&
+    isTransactionHashResponse(proof.resultHash) &&
     ["anchored", "failed", "pending", "prepared"].includes(
       String(proof.status),
     ) &&
@@ -383,14 +384,14 @@ function isStrategyRunRecord(value: unknown) {
     isOptionalPositiveResponseInteger(record.chainId) &&
     isOptionalResponseString(record.chainName) &&
     isValidResponseTimestamp(record.createdAt) &&
-    isNonEmptyResponseString(record.decisionHash) &&
+    isTransactionHashResponse(record.decisionHash) &&
     isNonEmptyResponseString(record.evidenceUri) &&
     isOptionalResponseString(record.explorerUrl) &&
     isNonEmptyResponseString(record.market) &&
     isFiniteResponseNumber(record.pnlBps) &&
     isNonEmptyResponseString(record.recordId) &&
     isEvmAddressResponse(record.recorder) &&
-    isNonEmptyResponseString(record.resultHash) &&
+    isTransactionHashResponse(record.resultHash) &&
     isNonEmptyResponseString(record.runId) &&
     ["backtested", "paper-opened", "paper-closed"].includes(
       String(record.status),

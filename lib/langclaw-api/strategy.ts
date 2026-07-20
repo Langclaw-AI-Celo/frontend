@@ -86,6 +86,12 @@ function isStrategyBacktest(value: unknown): value is StrategyBacktestPayload {
     isNonEmptyResponseString(backtest.title) &&
     Array.isArray(backtest.trades) &&
     backtest.trades.every(isStrategyTrade) &&
+    isConsistentStrategyIdentity(
+      backtest.chain,
+      backtest.pairAddress,
+      backtest.market,
+      backtest.strategyId,
+    ) &&
     (backtest.proof === undefined || isTradingJournalProof(backtest.proof))
   );
 }
@@ -265,7 +271,9 @@ function isStrategyScan(value: unknown): value is StrategyScanPayload {
     isOptionalResponseString(scan.chainName) &&
     isConsistentProductChainResponse(scan.chain, scan.chainId, scan.chainName) &&
     Array.isArray(scan.candidates) &&
-    scan.candidates.every(isStrategyScanCandidate) &&
+    scan.candidates.every((candidate) =>
+      isStrategyScanCandidate(candidate, scan.chain),
+    ) &&
     isValidResponseTimestamp(scan.generatedAt) &&
     isNonEmptyResponseString(scan.queryId) &&
     isNonNegativeResponseInteger(scan.scannedPairs) &&
@@ -274,7 +282,7 @@ function isStrategyScan(value: unknown): value is StrategyScanPayload {
   );
 }
 
-function isStrategyScanCandidate(value: unknown) {
+function isStrategyScanCandidate(value: unknown, chain: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
@@ -291,7 +299,12 @@ function isStrategyScanCandidate(value: unknown) {
     isNonNegativeResponseInteger(candidate.rowCount) &&
     isFiniteResponseNumber(candidate.score) &&
     isNonEmptyResponseString(candidate.scoreReason) &&
-    isNonNegativeResponseNumber(candidate.totalVolumeUsd)
+    isNonNegativeResponseNumber(candidate.totalVolumeUsd) &&
+    isConsistentStrategyIdentity(
+      chain,
+      candidate.pairAddress,
+      candidate.market,
+    )
   );
 }
 
@@ -352,6 +365,12 @@ function isStrategyPaperTrade(
     isNonEmptyResponseString(paperTrade.referenceBacktestRunId) &&
     isNonEmptyResponseString(paperTrade.runId) &&
     isNonEmptyResponseString(paperTrade.strategyId) &&
+    isConsistentStrategyIdentity(
+      paperTrade.chain,
+      paperTrade.pairAddress,
+      paperTrade.market,
+      paperTrade.strategyId,
+    ) &&
     proof?.action === paperTrade.action &&
     (paperTrade.chain === undefined ||
       proof.chain === undefined ||
@@ -427,7 +446,51 @@ function isStrategyRunRecord(value: unknown) {
       String(record.status),
     ) &&
     isNonEmptyResponseString(record.strategyId) &&
+    isConsistentStrategyIdentity(
+      record.chain,
+      undefined,
+      record.market,
+      record.strategyId,
+    ) &&
     isOptionalTransactionHash(record.txHash)
+  );
+}
+
+function isConsistentStrategyIdentity(
+  chain: unknown,
+  pairAddress: unknown,
+  market: unknown,
+  strategyId?: unknown,
+) {
+  if (chain === undefined) {
+    return true;
+  }
+
+  if (
+    (chain !== "celo" && chain !== "mantle") ||
+    typeof market !== "string"
+  ) {
+    return false;
+  }
+
+  const marketPrefix = `${chain}:`;
+  const marketPairAddress = market.startsWith(marketPrefix)
+    ? market.slice(marketPrefix.length)
+    : undefined;
+
+  if (
+    typeof marketPairAddress !== "string" ||
+    !isEvmAddressResponse(marketPairAddress)
+  ) {
+    return false;
+  }
+
+  return (
+    (pairAddress === undefined ||
+      (typeof pairAddress === "string" &&
+        marketPairAddress.toLowerCase() === pairAddress.toLowerCase())) &&
+    (strategyId === undefined ||
+      (typeof strategyId === "string" && strategyId.startsWith(`${chain}-`)))
   );
 }
 

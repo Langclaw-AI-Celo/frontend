@@ -10,6 +10,8 @@ import {
 
 import type { WalletAuth, WalletAuthPurpose, WalletChallenge } from "./types.ts";
 
+const MAX_WALLET_CHALLENGE_LIFETIME_MS = 5 * 60 * 1000;
+
 export async function requestWalletChallenge(input: {
   address: string;
   chainId?: number;
@@ -75,6 +77,7 @@ function isWalletChallenge(value: unknown): value is WalletChallenge {
     Number.isFinite(expiresAt) &&
     issuedAt <= Date.now() + 5 * 60 * 1000 &&
     expiresAt > issuedAt &&
+    expiresAt - issuedAt <= MAX_WALLET_CHALLENGE_LIFETIME_MS &&
     expiresAt > Date.now() &&
     isNonEmptyResponseString(challenge.message) &&
     isNonEmptyResponseString(challenge.nonce) &&

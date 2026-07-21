@@ -18,12 +18,19 @@ export async function requestWalletChallenge(input: {
   const response = await postJson("/api/wallet/challenge", input);
   const payload = await readJsonResponse<{
     challenge?: WalletChallenge;
-    configured: true;
+    configured?: unknown;
     error?: string;
   }>(response);
 
   if (payload.error) {
     throw new LangclawApiError(payload.error, response.status);
+  }
+
+  if (payload.configured !== true) {
+    throw new LangclawApiError(
+      "Backend returned invalid wallet challenge data.",
+      500,
+    );
   }
 
   if (!payload.challenge) {
@@ -80,13 +87,20 @@ function isWalletChallenge(value: unknown): value is WalletChallenge {
 export async function createWalletSession(wallet: WalletAuth) {
   const response = await postJson("/api/wallet/session", { wallet });
   const payload = await readJsonResponse<{
-    configured: true;
+    configured?: unknown;
     error?: string;
     wallet?: WalletAuth;
   }>(response);
 
   if (payload.error) {
     throw new LangclawApiError(payload.error, response.status);
+  }
+
+  if (payload.configured !== true) {
+    throw new LangclawApiError(
+      "Backend returned invalid wallet session data.",
+      500,
+    );
   }
 
   if (!payload.wallet?.sessionToken) {

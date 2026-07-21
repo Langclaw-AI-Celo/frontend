@@ -294,6 +294,50 @@ test("wallet challenge responses reject malformed signing data", async (t) => {
   }
 });
 
+test("wallet auth responses reject malformed configuration envelopes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const challenge = walletChallengeRecord();
+  const wallet = {
+    address: challenge.address,
+    signature: "0xsigned",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const testCase of [
+    {
+      payload: { challenge, configured: "true" },
+      request: () =>
+        requestWalletChallenge({
+          address: challenge.address,
+          chainId: challenge.chainId,
+          purpose: challenge.purpose,
+        }),
+      message: "Backend returned invalid wallet challenge data.",
+    },
+    {
+      payload: {
+        configured: false,
+        wallet: walletSessionRecord(),
+      },
+      request: () => createWalletSession(wallet),
+      message: "Backend returned invalid wallet session data.",
+    },
+  ]) {
+    globalThis.fetch = async () => Response.json(testCase.payload);
+
+    await assert.rejects(
+      testCase.request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === testCase.message &&
+        error.status === 500,
+    );
+  }
+});
+
 test("wallet challenge responses reject expired challenges", async (t) => {
   const originalFetch = globalThis.fetch;
   const challenge = walletChallengeRecord({

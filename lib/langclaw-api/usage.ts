@@ -1,5 +1,6 @@
 import {
   LangclawApiError,
+  isBoundedResponseInteger,
   isConsistentProductChainResponse,
   isEvmAddressResponse,
   isNonEmptyResponseString,
@@ -231,7 +232,7 @@ function isUsageBillingCurrency(value: unknown) {
   }
 
   return (
-    isNonNegativeResponseInteger(value.decimals) &&
+    isBoundedResponseInteger(value.decimals, 0, 36) &&
     isNonEmptyResponseString(value.name) &&
     isNonEmptyResponseString(value.symbol) &&
     (value.feeCurrencyAddress === undefined ||

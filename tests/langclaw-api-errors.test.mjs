@@ -1430,6 +1430,35 @@ test("usage deposits reject malformed monetary values", async (t) => {
   }
 });
 
+test("usage vaults reject unsafe billing decimals", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const decimals of [-1, 1.5, 37, 1_000_000_000]) {
+    globalThis.fetch = async () =>
+      Response.json(
+        usageVaultRecord({
+          billingCurrency: {
+            decimals,
+            name: "Celo",
+            symbol: "CELO",
+          },
+        }),
+      );
+
+    await assert.rejects(
+      getUsageVaultInfo("celo"),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("proof decision responses reject malformed chain records", async (t) => {
   const originalFetch = globalThis.fetch;
   const valid = proofDecisionsRecord();

@@ -3,6 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const apiDirectory = new URL("../lib/langclaw-api/", import.meta.url);
+const chatTransportPath = new URL(
+  "../lib/langclaw-chat-transport.ts",
+  import.meta.url,
+);
 
 const expectedModules = [
   "types.ts",
@@ -46,4 +50,17 @@ test("keeps internal API dependencies acyclic", async () => {
       );
     }
   }
+});
+
+test("chat transport reuses the validated API stream client", async () => {
+  const source = await readFile(chatTransportPath, "utf8");
+
+  assert.match(
+    source,
+    /import\s+\{[^}]*streamChat[^}]*\}\s+from\s+["']@\/lib\/langclaw-api["']/s,
+  );
+  assert.match(source, /await streamChat\s*\(\s*\{/);
+  assert.doesNotMatch(source, /\bfetch\s*\(/);
+  assert.doesNotMatch(source, /async function readNdjson\s*\(/);
+  assert.doesNotMatch(source, /response\.json\s*\(/);
 });

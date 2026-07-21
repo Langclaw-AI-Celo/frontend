@@ -6,11 +6,9 @@ import {
   type LangclawUIMessage,
 } from "@/lib/chat-utils";
 import {
-  getLangclawApiUrl,
   readFriendlyError,
-  LangclawApiError,
+  streamChat,
   type ChatMode,
-  type ChatStreamChunk,
   type DirectChatPayload,
   type DiscoverPayload,
   type OnChainPlanSummary,
@@ -195,48 +193,15 @@ async function pipeBackendStreamToUIMessageChunks({
       toolMode,
     });
 
-    const response = await fetch(getLangclawApiUrl("/api/chat/stream"), {
-      body: JSON.stringify({
-        chain: body.chain,
-        message,
-        messages: toBackendMessages(messages),
-        model: body.model,
-        researchTrend: toolMode === "research",
-        sessionId: body.sessionId ?? chatId,
-        toolMode,
-        useAgent: toolMode === "research",
-        wallet: body.wallet,
-      }),
-      headers: {
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-      signal: abortSignal,
-    });
+    appendReasoning("Opening backend stream. Reading live events when ready.\n");
 
-    if (!response.ok) {
-      throw new Error(await readErrorResponse(response));
-    }
-
-    if (!response.body) {
-      throw new Error("Streaming response was empty.");
-    }
-
-    appendReasoning("Backend stream opened. Reading live events now.\n");
-
-    await readNdjson(response.body, abortSignal, (chunk) => {
-      if (chunk.type === "direct_reasoning_delta") {
-        appendReasoning(typeof chunk.delta === "string" ? chunk.delta : "");
-        return;
-      }
-
-      if (chunk.type === "direct_delta") {
-        appendText(typeof chunk.delta === "string" ? chunk.delta : "");
-        return;
-      }
-
-      if (chunk.type === "direct") {
-        const payload = readDirectPayload(chunk.payload);
+    await streamChat({
+      chain: body.chain,
+      message,
+      messages: toBackendMessages(messages),
+      model: body.model,
+      onDirect: (value) => {
+        const payload = readDirectPayload(value);
 
         if (!text && payload.answer) {
           stopReasoningHeartbeat(reasoningHeartbeat);
@@ -248,65 +213,23 @@ async function pipeBackendStreamToUIMessageChunks({
           mode: "chat",
           model: payload.usedModel ?? payload.model ?? body.model,
         });
-        return;
-      }
-
-      if (chunk.type === "mode") {
-        const mode = typeof chunk.mode === "string" ? chunk.mode : "chat";
+      },
+      onDirectDelta: appendText,
+      onDirectReasoningDelta: appendReasoning,
+      onError: (message) => {
+        throw new Error(message);
+      },
+      onMode: (mode) => {
         appendReasoning(`Route selected: ${mode}.\n`);
-        return;
-      }
-
-      if (chunk.type === "tool_plan") {
-        const plan = readOnChainPlan(chunk.plan);
-        updateMetadata({ mode: "onchain" });
-        appendReasoning(formatOnChainPlanReasoning(plan));
-        return;
-      }
-
-      if (chunk.type === "tool_call") {
-        const event = readOnChainToolCall(chunk.event);
-        updateMetadata({ mode: "onchain" });
-        appendReasoning(
-          `${event.provider}: running ${event.title} (${event.domain}).\n`
-        );
-        return;
-      }
-
-      if (chunk.type === "tool_result") {
-        const event = readOnChainToolResult(chunk.event);
-        updateMetadata({ mode: "onchain" });
-        appendReasoning(
-          `${event.provider}: ${event.title} ${event.status} - ${event.summary}\n`
-        );
-        return;
-      }
-
-      if (chunk.type === "tool_final") {
-        const payload = readOnChainPayload(chunk.payload);
-        appendReasoning(
-          `${payload.plan.chainName || chainConfig.name} Intelligence tools complete. Composing final answer.\n`,
-        );
-        stopReasoningHeartbeat(reasoningHeartbeat);
-        closeReasoningPart();
-        appendText(buildOnChainAnswerContent(payload));
-        updateMetadata({ mode: "onchain", onChain: payload });
-        return;
-      }
-
-      if (chunk.type === "progress") {
-        const event = readProgressEvent(chunk.event);
-        progressEvents = [
-          ...progressEvents,
-          event,
-        ];
+      },
+      onProgress: (value) => {
+        const event = readProgressEvent(value);
+        progressEvents = [...progressEvents, event];
         updateMetadata({ progressEvents });
         appendReasoning(formatProgressReasoning(event));
-        return;
-      }
-
-      if (chunk.type === "result") {
-        const payload = readDiscoverPayload(chunk.payload);
+      },
+      onResult: (value) => {
+        const payload = readDiscoverPayload(value);
         appendReasoning(
           `${payload.proof?.chain.chainName || chainConfig.name} Alpha run complete. Composing final answer.\n`,
         );
@@ -322,12 +245,41 @@ async function pipeBackendStreamToUIMessageChunks({
           progressEvents,
           result: payload,
         });
-        return;
-      }
-
-      if (chunk.type === "error") {
-        throw new Error(readErrorMessage(chunk.error));
-      }
+      },
+      onToolCall: (value) => {
+        const event = readOnChainToolCall(value);
+        updateMetadata({ mode: "onchain" });
+        appendReasoning(
+          `${event.provider}: running ${event.title} (${event.domain}).\n`
+        );
+      },
+      onToolFinal: (value) => {
+        const payload = readOnChainPayload(value);
+        appendReasoning(
+          `${payload.plan.chainName || chainConfig.name} Intelligence tools complete. Composing final answer.\n`,
+        );
+        stopReasoningHeartbeat(reasoningHeartbeat);
+        closeReasoningPart();
+        appendText(buildOnChainAnswerContent(payload));
+        updateMetadata({ mode: "onchain", onChain: payload });
+      },
+      onToolPlan: (value) => {
+        const plan = readOnChainPlan(value);
+        updateMetadata({ mode: "onchain" });
+        appendReasoning(formatOnChainPlanReasoning(plan));
+      },
+      onToolResult: (value) => {
+        const event = readOnChainToolResult(value);
+        updateMetadata({ mode: "onchain" });
+        appendReasoning(
+          `${event.provider}: ${event.title} ${event.status} - ${event.summary}\n`
+        );
+      },
+      researchTrend: toolMode === "research",
+      sessionId: body.sessionId ?? chatId,
+      signal: abortSignal,
+      toolMode,
+      wallet: body.wallet,
     });
 
     stopReasoningHeartbeat(reasoningHeartbeat);
@@ -346,8 +298,7 @@ async function pipeBackendStreamToUIMessageChunks({
       return;
     }
 
-    const message =
-      error instanceof Error ? error.message : "Langclaw request failed.";
+    const message = readFriendlyError(error, "Langclaw request failed.");
 
     appendText(text ? `\n\n${message}` : message);
     closeReasoningPart();
@@ -399,65 +350,6 @@ function toBackendMessages(
         ]
       : [];
   });
-}
-
-async function readNdjson(
-  body: ReadableStream<Uint8Array>,
-  abortSignal: AbortSignal | undefined,
-  onChunk: (chunk: ChatStreamChunk) => void
-) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    if (abortSignal?.aborted) {
-      await reader.cancel();
-      throw new DOMException("Request aborted.", "AbortError");
-    }
-
-    const { done, value } = await reader.read();
-
-    if (done) {
-      break;
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      readLine(line, onChunk);
-    }
-  }
-
-  readLine(buffer, onChunk);
-}
-
-function readLine(line: string, onChunk: (chunk: ChatStreamChunk) => void) {
-  const trimmed = line.trim();
-
-  if (!trimmed) {
-    return;
-  }
-
-  onChunk(JSON.parse(trimmed) as ChatStreamChunk);
-}
-
-async function readErrorResponse(response: Response) {
-  const payload = (await response.json().catch(() => null)) as
-    | { code?: string; error?: string }
-    | null;
-  const message = payload?.error || `Request failed with status ${response.status}.`;
-
-  return readFriendlyError(
-    new LangclawApiError(message, response.status, payload?.code),
-    message,
-  );
-}
-
-function readErrorMessage(value: unknown) {
-  return typeof value === "string" ? value : "Langclaw request failed.";
 }
 
 function readDirectPayload(value: unknown): DirectChatPayload {

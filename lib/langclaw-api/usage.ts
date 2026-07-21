@@ -121,6 +121,10 @@ function isNonNegativeIntegerResponseString(value: unknown): value is string {
   return typeof value === "string" && /^\d+$/.test(value);
 }
 
+function isOptionalNonNegativeIntegerResponseString(value: unknown) {
+  return value === undefined || isNonNegativeIntegerResponseString(value);
+}
+
 function isNonNegativeDecimalResponseString(value: unknown): value is string {
   return typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value);
 }
@@ -171,17 +175,17 @@ function isUsageQuote(value: unknown): value is UsageQuote {
     isOptionalResponseString(value.nativeSymbol) &&
     isNonEmptyResponseString(value.model) &&
     isNonEmptyResponseString(value.endpoint) &&
-    isNonEmptyResponseString(value.promptPriceNeuron) &&
-    isNonEmptyResponseString(value.completionPriceNeuron) &&
-    isOptionalResponseString(value.imagePriceNeuron) &&
-    isOptionalResponseString(value.promptPriceUsd) &&
-    isOptionalResponseString(value.completionPriceUsd) &&
-    isOptionalResponseString(value.imagePriceUsd) &&
+    isNonNegativeIntegerResponseString(value.promptPriceNeuron) &&
+    isNonNegativeIntegerResponseString(value.completionPriceNeuron) &&
+    isOptionalNonNegativeIntegerResponseString(value.imagePriceNeuron) &&
+    isOptionalNonNegativeDecimalResponseString(value.promptPriceUsd) &&
+    isOptionalNonNegativeDecimalResponseString(value.completionPriceUsd) &&
+    isOptionalNonNegativeDecimalResponseString(value.imagePriceUsd) &&
     isNonNegativeResponseInteger(value.estimatedPromptTokens) &&
     isNonNegativeResponseInteger(value.estimatedCompletionTokens) &&
-    isNonEmptyResponseString(value.estimatedCostNeuron) &&
-    isNonEmptyResponseString(value.estimatedCost0G) &&
-    isOptionalResponseString(value.estimatedCostNative) &&
+    isNonNegativeIntegerResponseString(value.estimatedCostNeuron) &&
+    isNonNegativeDecimalResponseString(value.estimatedCost0G) &&
+    isOptionalNonNegativeDecimalResponseString(value.estimatedCostNative) &&
     isValidResponseTimestamp(value.priceFetchedAt)
   );
 }

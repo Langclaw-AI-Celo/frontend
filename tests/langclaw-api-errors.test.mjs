@@ -1306,6 +1306,34 @@ test("usage balances reject malformed monetary values", async (t) => {
   }
 });
 
+test("usage quotes reject malformed monetary values", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const quote of [
+    usageQuoteRecord({ promptPriceNeuron: "-1" }),
+    usageQuoteRecord({ completionPriceNeuron: "1.5" }),
+    usageQuoteRecord({ promptPriceUsd: "NaN" }),
+    usageQuoteRecord({ estimatedCostNeuron: "1e3" }),
+    usageQuoteRecord({ estimatedCost0G: "-0.1" }),
+    usageQuoteRecord({ estimatedCostNative: "Infinity" }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, quote });
+
+    await assert.rejects(
+      getUsageQuote("celo"),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("proof decision responses reject malformed chain records", async (t) => {
   const originalFetch = globalThis.fetch;
   const valid = proofDecisionsRecord();
@@ -2943,6 +2971,28 @@ function usageBalanceRecord(overrides = {}) {
     reserved0G: "0.25",
     reservedNative: "0.125",
     reservedNeuron: "250000000",
+    ...overrides,
+  };
+}
+
+function usageQuoteRecord(overrides = {}) {
+  return {
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    completionPriceNeuron: "2",
+    completionPriceUsd: "0.000002",
+    endpoint: "chat.completions",
+    estimatedCompletionTokens: 1_000,
+    estimatedCost0G: "0.000008",
+    estimatedCostNative: "0.000008",
+    estimatedCostNeuron: "8000",
+    estimatedPromptTokens: 6_000,
+    model: "gpt-5.4-nano",
+    nativeSymbol: "CELO",
+    priceFetchedAt: new Date().toISOString(),
+    promptPriceNeuron: "1",
+    promptPriceUsd: "0.000001",
     ...overrides,
   };
 }

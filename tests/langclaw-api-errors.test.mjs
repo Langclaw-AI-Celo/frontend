@@ -437,6 +437,42 @@ test("wallet session responses reject expired credentials", async (t) => {
   );
 });
 
+test("wallet session responses reject unusable tokens and excessive lifetimes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    signature: "0xsigned",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const overrides of [
+    { sessionToken: "session token" },
+    { sessionToken: "x".repeat(4_097) },
+    {
+      sessionExpiresAt: new Date(
+        Date.now() + 14 * 60 * 60 * 1000,
+      ).toISOString(),
+    },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({
+        configured: true,
+        wallet: walletSessionRecord(overrides),
+      });
+
+    await assert.rejects(
+      createWalletSession(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid wallet session data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("wallet sessions must match the authenticated account", async (t) => {
   const originalFetch = globalThis.fetch;
   const wallet = {

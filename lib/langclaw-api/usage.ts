@@ -1,5 +1,6 @@
 import {
   LangclawApiError,
+  isConsistentProductChainResponse,
   isEvmAddressResponse,
   isNonEmptyResponseString,
   isNonNegativeResponseInteger,
@@ -30,7 +31,7 @@ export async function getUsageBalance(wallet: WalletAuth, chain?: ProductChainId
   const response = await postJson("/api/usage/balance", { chain, wallet });
   const payload = await readJsonResponse<UsageBalancePayload>(response);
 
-  if (!isUsageBalancePayload(payload)) {
+  if (!isUsageBalancePayload(payload, wallet, chain)) {
     throw invalidUsageResponse();
   }
 
@@ -41,7 +42,7 @@ export async function getUsageQuote(chain?: ProductChainId) {
   const response = await postJson("/api/usage/quote", { chain });
   const payload = await readJsonResponse<UsageQuotePayload>(response);
 
-  if (payload.configured !== true || !isUsageQuote(payload.quote)) {
+  if (payload.configured !== true || !isUsageQuote(payload.quote, chain)) {
     throw invalidUsageResponse();
   }
 
@@ -52,7 +53,7 @@ export async function getUsageVaultInfo(chain?: ProductChainId) {
   const response = await postJson("/api/usage/vault", { chain });
   const payload = await readJsonResponse<UsageVaultInfoPayload>(response);
 
-  if (!isUsageVaultInfo(payload)) {
+  if (!isUsageVaultInfo(payload, chain)) {
     throw invalidUsageResponse();
   }
 
@@ -68,7 +69,7 @@ export async function verifyUsageDeposit(input: {
   const response = await postJson("/api/usage/deposit/verify", input);
   const payload = await readJsonResponse<UsageDepositVerifyPayload>(response);
 
-  if (!isUsageDeposit(payload)) {
+  if (!isUsageDeposit(payload, input)) {
     throw invalidUsageResponse();
   }
 
@@ -82,30 +83,35 @@ export async function requestUsageWithdraw(
   const response = await postJson("/api/usage/withdraw/request", { chain, wallet });
   const payload = await readJsonResponse<UsageWithdrawRequestPayload>(response);
 
-  if (!isUsageWithdrawRequest(payload)) {
+  if (!isUsageWithdrawRequest(payload, wallet, chain)) {
     throw invalidUsageResponse();
   }
 
   return payload;
 }
 
-function isUsageBalancePayload(value: unknown): value is UsageBalancePayload {
+function isUsageBalancePayload(
+  value: unknown,
+  wallet: WalletAuth,
+  requestedChain?: ProductChainId,
+): value is UsageBalancePayload {
   if (!isResponseObject(value)) {
     return false;
   }
 
   const balance = value.balance;
   const quote = value.quote;
+  const responseChain = readResponseChain(value.chain) ?? requestedChain;
 
   return (
     value.configured === true &&
-    isOptionalProductChain(value.chain) &&
+    matchesRequestedChain(value, requestedChain) &&
     isOptionalPositiveResponseInteger(value.chainId) &&
     isOptionalResponseString(value.chainName) &&
     isOptionalResponseString(value.nativeSymbol) &&
-    isEvmAddressResponse(value.wallet) &&
-    isUsageBalance(balance) &&
-    (quote === undefined || isUsageQuote(quote)) &&
+    matchesWalletAddress(value.wallet, wallet.address) &&
+    isUsageBalance(balance, responseChain) &&
+    (quote === undefined || isUsageQuote(quote, responseChain)) &&
     (!isResponseObject(balance) ||
       value.chain === undefined ||
       balance.chain === undefined ||
@@ -133,13 +139,16 @@ function isOptionalNonNegativeDecimalResponseString(value: unknown) {
   return value === undefined || isNonNegativeDecimalResponseString(value);
 }
 
-function isUsageBalance(value: unknown): value is UsageBalance {
+function isUsageBalance(
+  value: unknown,
+  requestedChain?: ProductChainId,
+): value is UsageBalance {
   if (!isResponseObject(value)) {
     return false;
   }
 
   return (
-    isOptionalProductChain(value.chain) &&
+    matchesRequestedChain(value, requestedChain) &&
     isOptionalPositiveResponseInteger(value.chainId) &&
     isOptionalResponseString(value.nativeSymbol) &&
     [
@@ -163,13 +172,16 @@ function isUsageBalance(value: unknown): value is UsageBalance {
   );
 }
 
-function isUsageQuote(value: unknown): value is UsageQuote {
+function isUsageQuote(
+  value: unknown,
+  requestedChain?: ProductChainId,
+): value is UsageQuote {
   if (!isResponseObject(value)) {
     return false;
   }
 
   return (
-    isOptionalProductChain(value.chain) &&
+    matchesRequestedChain(value, requestedChain) &&
     isOptionalPositiveResponseInteger(value.chainId) &&
     isOptionalResponseString(value.chainName) &&
     isOptionalResponseString(value.nativeSymbol) &&
@@ -190,14 +202,17 @@ function isUsageQuote(value: unknown): value is UsageQuote {
   );
 }
 
-function isUsageVaultInfo(value: unknown): value is UsageVaultInfoPayload {
+function isUsageVaultInfo(
+  value: unknown,
+  requestedChain?: ProductChainId,
+): value is UsageVaultInfoPayload {
   if (!isResponseObject(value)) {
     return false;
   }
 
   return (
     value.configured === true &&
-    isOptionalProductChain(value.chain) &&
+    matchesRequestedChain(value, requestedChain) &&
     isOptionalPositiveResponseInteger(value.chainId) &&
     isOptionalResponseString(value.chainName) &&
     isOptionalResponseString(value.nativeSymbol) &&
@@ -226,20 +241,33 @@ function isUsageBillingCurrency(value: unknown) {
   );
 }
 
-function isUsageDeposit(value: unknown): value is UsageDepositVerifyPayload {
+function isUsageDeposit(
+  value: unknown,
+  input: {
+    chain?: ProductChainId;
+    txHash: string;
+    wallet: WalletAuth;
+  },
+): value is UsageDepositVerifyPayload {
   if (!isResponseObject(value)) {
     return false;
   }
 
   return (
     value.configured === true &&
-    isOptionalProductChain(value.chain) &&
+    matchesRequestedChain(value, input.chain) &&
     isOptionalPositiveResponseInteger(value.chainId) &&
     isOptionalResponseString(value.chainName) &&
     isOptionalResponseString(value.nativeSymbol) &&
-    isEvmAddressResponse(value.wallet) &&
-    (value.walletSession === undefined || isWalletSession(value.walletSession)) &&
+    matchesWalletAddress(value.wallet, input.wallet.address) &&
+    (value.walletSession === undefined ||
+      (isWalletSession(value.walletSession) &&
+        matchesWalletAddress(
+          value.walletSession.address,
+          input.wallet.address,
+        ))) &&
     isTransactionHashResponse(value.txHash) &&
+    value.txHash.toLowerCase() === input.txHash.trim().toLowerCase() &&
     isNonEmptyResponseString(value.amountNeuron) &&
     isNonEmptyResponseString(value.amount0G) &&
     isOptionalResponseString(value.amountNative) &&
@@ -251,6 +279,8 @@ function isUsageDeposit(value: unknown): value is UsageDepositVerifyPayload {
 
 function isUsageWithdrawRequest(
   value: unknown,
+  wallet: WalletAuth,
+  requestedChain?: ProductChainId,
 ): value is UsageWithdrawRequestPayload {
   if (!isResponseObject(value)) {
     return false;
@@ -259,11 +289,41 @@ function isUsageWithdrawRequest(
   const request = value as Record<string, unknown>;
 
   return (
-    isUsageVaultInfo(value) &&
-    isEvmAddressResponse(request.wallet) &&
+    isUsageVaultInfo(value, requestedChain) &&
+    matchesWalletAddress(request.wallet, wallet.address) &&
     request.functionName === "withdraw" &&
-    isUsageBalance(request.balance) &&
+    isUsageBalance(request.balance, readResponseChain(request.chain) ?? requestedChain) &&
     isNonEmptyResponseString(request.note)
+  );
+}
+
+function matchesRequestedChain(
+  value: Record<string, unknown>,
+  requestedChain?: ProductChainId,
+) {
+  const responseChain = readResponseChain(value.chain);
+
+  return (
+    isOptionalProductChain(value.chain) &&
+    (requestedChain === undefined ||
+      responseChain === undefined ||
+      responseChain === requestedChain) &&
+    isConsistentProductChainResponse(
+      responseChain ?? requestedChain,
+      value.chainId,
+      value.chainName,
+    )
+  );
+}
+
+function readResponseChain(value: unknown): ProductChainId | undefined {
+  return value === "celo" || value === "mantle" ? value : undefined;
+}
+
+function matchesWalletAddress(value: unknown, expected: string) {
+  return (
+    isEvmAddressResponse(value) &&
+    value.toLowerCase() === expected.trim().toLowerCase()
   );
 }
 

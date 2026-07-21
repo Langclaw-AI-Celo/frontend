@@ -1,5 +1,6 @@
 import {
   LangclawApiError,
+  isConsistentProductChainResponse,
   isEvmAddressResponse,
   isNonEmptyResponseString,
   isOptionalProductChain,
@@ -19,7 +20,7 @@ export async function listProofDecisions(limit = 20, chain?: ProductChainId) {
   const response = await postJson("/api/proofs/decisions", { chain, limit });
   const payload = await readJsonResponse<ProofDecisionsPayload>(response);
 
-  if (!isProofDecisionsPayload(payload)) {
+  if (!isProofDecisionsPayload(payload, chain)) {
     throw new LangclawApiError(
       "Backend returned invalid proof decision data.",
       500,
@@ -31,6 +32,7 @@ export async function listProofDecisions(limit = 20, chain?: ProductChainId) {
 
 function isProofDecisionsPayload(
   value: unknown,
+  requestedChain?: ProductChainId,
 ): value is ProofDecisionsPayload {
   if (!isResponseObject(value)) {
     return false;
@@ -39,6 +41,14 @@ function isProofDecisionsPayload(
   return (
     value.configured === true &&
     isOptionalProductChain(value.chain) &&
+    (requestedChain === undefined ||
+      value.chain === undefined ||
+      value.chain === requestedChain) &&
+    isConsistentProductChainResponse(
+      value.chain ?? requestedChain,
+      value.chainId,
+      value.chainName,
+    ) &&
     isPositiveResponseInteger(value.chainId) &&
     isOptionalResponseString(value.chainName) &&
     isOptionalResponseString(value.nativeSymbol) &&

@@ -1344,6 +1344,9 @@ test("proof decision responses reject malformed chain records", async (t) => {
 
   for (const payload of [
     { ...valid, chainId: "42220" },
+    { ...valid, chainId: 5000 },
+    { ...valid, chainName: "Mantle" },
+    { ...valid, chain: "mantle" },
     { ...valid, decisions: "invalid" },
     { ...valid, decisions: [{ ...valid.decisions[0], decisionHash: "0x1234" }] },
     { ...valid, registryAddress: "invalid" },

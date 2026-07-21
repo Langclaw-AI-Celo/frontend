@@ -268,12 +268,12 @@ function isUsageDeposit(
         ))) &&
     isTransactionHashResponse(value.txHash) &&
     value.txHash.toLowerCase() === input.txHash.trim().toLowerCase() &&
-    isNonEmptyResponseString(value.amountNeuron) &&
-    isNonEmptyResponseString(value.amount0G) &&
-    isOptionalResponseString(value.amountNative) &&
+    isNonNegativeIntegerResponseString(value.amountNeuron) &&
+    isNonNegativeDecimalResponseString(value.amount0G) &&
+    isOptionalNonNegativeDecimalResponseString(value.amountNative) &&
     typeof value.credited === "boolean" &&
-    isNonEmptyResponseString(value.balanceBefore) &&
-    isNonEmptyResponseString(value.balanceAfter)
+    isNonNegativeIntegerResponseString(value.balanceBefore) &&
+    isNonNegativeIntegerResponseString(value.balanceAfter)
   );
 }
 

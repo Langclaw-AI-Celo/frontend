@@ -1402,6 +1402,34 @@ test("usage responses bind wallet, chain, and transaction identities", async (t)
   }
 });
 
+test("usage deposits reject malformed monetary values", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+  const txHash = `0x${"1".repeat(64)}`;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    usageDepositRecord({ amountNeuron: "-1" }),
+    usageDepositRecord({ amount0G: "NaN" }),
+    usageDepositRecord({ amountNative: "-0.1" }),
+    usageDepositRecord({ balanceBefore: "1.5" }),
+    usageDepositRecord({ balanceAfter: "1e3" }),
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      verifyUsageDeposit({ chain: "celo", txHash, wallet }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("proof decision responses reject malformed chain records", async (t) => {
   const originalFetch = globalThis.fetch;
   const valid = proofDecisionsRecord();

@@ -6,6 +6,8 @@ const DEFAULT_BACKEND_URL =
     : "http://localhost:3001";
 const MAX_JSON_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_NDJSON_CHUNK_CHARACTERS = 1_048_576;
+const MAX_WALLET_SESSION_LIFETIME_MS = 13 * 60 * 60 * 1000;
+const MAX_WALLET_SESSION_TOKEN_CHARACTERS = 4_096;
 
 export class LangclawApiError extends Error {
   code?: string;
@@ -73,11 +75,11 @@ export function isNonEmptyResponseString(value: unknown): value is string {
   return typeof value === "string" && Boolean(value.trim());
 }
 
-export function isEvmAddressResponse(value: unknown) {
+export function isEvmAddressResponse(value: unknown): value is string {
   return typeof value === "string" && /^0x[a-fA-F0-9]{40}$/.test(value);
 }
 
-export function isTransactionHashResponse(value: unknown) {
+export function isTransactionHashResponse(value: unknown): value is string {
   return typeof value === "string" && /^0x[a-fA-F0-9]{64}$/.test(value);
 }
 
@@ -93,19 +95,38 @@ export function isFutureResponseTimestamp(value: unknown) {
   return isValidResponseTimestamp(value) && Date.parse(value) > Date.now();
 }
 
-export function isWalletSession(value: unknown): value is WalletAuth {
+export function isWalletSession(
+  value: unknown,
+  now = Date.now(),
+): value is WalletAuth &
+  Required<Pick<WalletAuth, "address" | "sessionExpiresAt" | "sessionToken">> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
 
   const wallet = value as Record<string, unknown>;
+  const expiresAt =
+    typeof wallet.sessionExpiresAt === "string"
+      ? Date.parse(wallet.sessionExpiresAt)
+      : Number.NaN;
 
   return (
     isEvmAddressResponse(wallet.address) &&
-    isNonEmptyResponseString(wallet.sessionToken) &&
-    isFutureResponseTimestamp(wallet.sessionExpiresAt) &&
+    isUsableWalletSessionToken(wallet.sessionToken) &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > now &&
+    expiresAt - now <= MAX_WALLET_SESSION_LIFETIME_MS &&
     isOptionalResponseString(wallet.message) &&
     isOptionalResponseString(wallet.signature)
+  );
+}
+
+function isUsableWalletSessionToken(value: unknown) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_WALLET_SESSION_TOKEN_CHARACTERS &&
+    !/\s/.test(value)
   );
 }
 

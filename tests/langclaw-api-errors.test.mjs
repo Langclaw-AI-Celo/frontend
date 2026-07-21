@@ -294,6 +294,50 @@ test("wallet challenge responses reject malformed signing data", async (t) => {
   }
 });
 
+test("wallet auth responses reject malformed configuration envelopes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const challenge = walletChallengeRecord();
+  const wallet = {
+    address: challenge.address,
+    signature: "0xsigned",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const testCase of [
+    {
+      payload: { challenge, configured: "true" },
+      request: () =>
+        requestWalletChallenge({
+          address: challenge.address,
+          chainId: challenge.chainId,
+          purpose: challenge.purpose,
+        }),
+      message: "Backend returned invalid wallet challenge data.",
+    },
+    {
+      payload: {
+        configured: false,
+        wallet: walletSessionRecord(),
+      },
+      request: () => createWalletSession(wallet),
+      message: "Backend returned invalid wallet session data.",
+    },
+  ]) {
+    globalThis.fetch = async () => Response.json(testCase.payload);
+
+    await assert.rejects(
+      testCase.request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === testCase.message &&
+        error.status === 500,
+    );
+  }
+});
+
 test("wallet challenge responses reject expired challenges", async (t) => {
   const originalFetch = globalThis.fetch;
   const challenge = walletChallengeRecord({
@@ -327,6 +371,34 @@ test("wallet challenge responses reject far-future issuance", async (t) => {
   const challenge = walletChallengeRecord({
     expiresAt: new Date(now + 65 * 60 * 1000).toISOString(),
     issuedAt: new Date(now + 60 * 60 * 1000).toISOString(),
+  });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({ challenge, configured: true });
+
+  await assert.rejects(
+    requestWalletChallenge({
+      address: challenge.address,
+      chainId: challenge.chainId,
+      purpose: challenge.purpose,
+    }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid wallet challenge data." &&
+      error.status === 500,
+  );
+});
+
+test("wallet challenge responses reject excessive lifetimes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const now = Date.now();
+  const challenge = walletChallengeRecord({
+    expiresAt: new Date(now + 60 * 60 * 1000).toISOString(),
+    issuedAt: new Date(now - 60 * 1000).toISOString(),
   });
 
   t.after(() => {
@@ -435,6 +507,42 @@ test("wallet session responses reject expired credentials", async (t) => {
       error.message === "Backend returned invalid wallet session data." &&
       error.status === 500,
   );
+});
+
+test("wallet session responses reject unusable tokens and excessive lifetimes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = {
+    address: "0x1111111111111111111111111111111111111111",
+    signature: "0xsigned",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const overrides of [
+    { sessionToken: "session token" },
+    { sessionToken: "x".repeat(4_097) },
+    {
+      sessionExpiresAt: new Date(
+        Date.now() + 14 * 60 * 60 * 1000,
+      ).toISOString(),
+    },
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({
+        configured: true,
+        wallet: walletSessionRecord(overrides),
+      });
+
+    await assert.rejects(
+      createWalletSession(wallet),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid wallet session data." &&
+        error.status === 500,
+    );
+  }
 });
 
 test("wallet sessions must match the authenticated account", async (t) => {
@@ -1198,6 +1306,159 @@ test("usage balances reject malformed monetary values", async (t) => {
   }
 });
 
+test("usage quotes reject malformed monetary values", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const quote of [
+    usageQuoteRecord({ promptPriceNeuron: "-1" }),
+    usageQuoteRecord({ completionPriceNeuron: "1.5" }),
+    usageQuoteRecord({ promptPriceUsd: "NaN" }),
+    usageQuoteRecord({ estimatedCostNeuron: "1e3" }),
+    usageQuoteRecord({ estimatedCost0G: "-0.1" }),
+    usageQuoteRecord({ estimatedCostNative: "Infinity" }),
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({ configured: true, quote });
+
+    await assert.rejects(
+      getUsageQuote("celo"),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("usage responses bind wallet, chain, and transaction identities", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+  const otherWallet = "0x2222222222222222222222222222222222222222";
+  const txHash = `0x${"1".repeat(64)}`;
+  const otherTxHash = `0x${"2".repeat(64)}`;
+  const mantle = {
+    chain: "mantle",
+    chainId: 5000,
+    chainName: "Mantle",
+    nativeSymbol: "MNT",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const testCase of [
+    {
+      payload: {
+        balance: usageBalanceRecord(),
+        configured: true,
+        wallet: otherWallet,
+      },
+      request: () => getUsageBalance(wallet, "celo"),
+    },
+    {
+      payload: {
+        configured: true,
+        quote: usageQuoteRecord(mantle),
+      },
+      request: () => getUsageQuote("celo"),
+    },
+    {
+      payload: usageVaultRecord(mantle),
+      request: () => getUsageVaultInfo("celo"),
+    },
+    {
+      payload: usageDepositRecord({ txHash: otherTxHash }),
+      request: () =>
+        verifyUsageDeposit({ chain: "celo", txHash, wallet }),
+    },
+    {
+      payload: usageDepositRecord({ wallet: otherWallet }),
+      request: () =>
+        verifyUsageDeposit({ chain: "celo", txHash, wallet }),
+    },
+    {
+      payload: usageWithdrawRecord({ wallet: otherWallet }),
+      request: () => requestUsageWithdraw(wallet, "celo"),
+    },
+    {
+      payload: usageWithdrawRecord(mantle),
+      request: () => requestUsageWithdraw(wallet, "celo"),
+    },
+  ]) {
+    globalThis.fetch = async () => Response.json(testCase.payload);
+
+    await assert.rejects(
+      testCase.request(),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("usage deposits reject malformed monetary values", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+  const txHash = `0x${"1".repeat(64)}`;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const payload of [
+    usageDepositRecord({ amountNeuron: "-1" }),
+    usageDepositRecord({ amount0G: "NaN" }),
+    usageDepositRecord({ amountNative: "-0.1" }),
+    usageDepositRecord({ balanceBefore: "1.5" }),
+    usageDepositRecord({ balanceAfter: "1e3" }),
+  ]) {
+    globalThis.fetch = async () => Response.json(payload);
+
+    await assert.rejects(
+      verifyUsageDeposit({ chain: "celo", txHash, wallet }),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("usage vaults reject unsafe billing decimals", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const decimals of [-1, 1.5, 37, 1_000_000_000]) {
+    globalThis.fetch = async () =>
+      Response.json(
+        usageVaultRecord({
+          billingCurrency: {
+            decimals,
+            name: "Celo",
+            symbol: "CELO",
+          },
+        }),
+      );
+
+    await assert.rejects(
+      getUsageVaultInfo("celo"),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid usage data." &&
+        error.status === 500,
+    );
+  }
+});
+
 test("proof decision responses reject malformed chain records", async (t) => {
   const originalFetch = globalThis.fetch;
   const valid = proofDecisionsRecord();
@@ -1208,6 +1469,9 @@ test("proof decision responses reject malformed chain records", async (t) => {
 
   for (const payload of [
     { ...valid, chainId: "42220" },
+    { ...valid, chainId: 5000 },
+    { ...valid, chainName: "Mantle" },
+    { ...valid, chain: "mantle" },
     { ...valid, decisions: "invalid" },
     { ...valid, decisions: [{ ...valid.decisions[0], decisionHash: "0x1234" }] },
     { ...valid, registryAddress: "invalid" },
@@ -2835,6 +3099,69 @@ function usageBalanceRecord(overrides = {}) {
     reserved0G: "0.25",
     reservedNative: "0.125",
     reservedNeuron: "250000000",
+    ...overrides,
+  };
+}
+
+function usageQuoteRecord(overrides = {}) {
+  return {
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    completionPriceNeuron: "2",
+    completionPriceUsd: "0.000002",
+    endpoint: "chat.completions",
+    estimatedCompletionTokens: 1_000,
+    estimatedCost0G: "0.000008",
+    estimatedCostNative: "0.000008",
+    estimatedCostNeuron: "8000",
+    estimatedPromptTokens: 6_000,
+    model: "gpt-5.4-nano",
+    nativeSymbol: "CELO",
+    priceFetchedAt: new Date().toISOString(),
+    promptPriceNeuron: "1",
+    promptPriceUsd: "0.000001",
+    ...overrides,
+  };
+}
+
+function usageVaultRecord(overrides = {}) {
+  return {
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    configured: true,
+    nativeSymbol: "CELO",
+    vaultAddress: "0x3333333333333333333333333333333333333333",
+    ...overrides,
+  };
+}
+
+function usageDepositRecord(overrides = {}) {
+  return {
+    amount0G: "0.5",
+    amountNeuron: "500000000",
+    balanceAfter: "1500000000",
+    balanceBefore: "1000000000",
+    chain: "celo",
+    chainId: 42220,
+    chainName: "Celo",
+    configured: true,
+    credited: true,
+    nativeSymbol: "CELO",
+    txHash: `0x${"1".repeat(64)}`,
+    wallet: "0x1111111111111111111111111111111111111111",
+    ...overrides,
+  };
+}
+
+function usageWithdrawRecord(overrides = {}) {
+  return {
+    ...usageVaultRecord(),
+    balance: usageBalanceRecord(),
+    functionName: "withdraw",
+    note: "Submit this transaction from the authenticated wallet.",
+    wallet: "0x1111111111111111111111111111111111111111",
     ...overrides,
   };
 }

@@ -1,8 +1,7 @@
-import type { WalletAuth } from "./langclaw-api.ts";
+import { isWalletSession } from "./langclaw-api/core.ts";
+import type { WalletAuth } from "./langclaw-api/types.ts";
 
 const SESSION_REFRESH_MARGIN_MS = 60 * 1000;
-const MAX_SESSION_LIFETIME_MS = 13 * 60 * 60 * 1000;
-const MAX_SESSION_TOKEN_CHARACTERS = 4_096;
 
 export function parseCachedWalletAuth(
   raw: string | null,
@@ -14,17 +13,11 @@ export function parseCachedWalletAuth(
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<WalletAuth>;
+    const parsed: unknown = JSON.parse(raw);
 
     if (
-      typeof parsed.address !== "string" ||
-      typeof parsed.sessionExpiresAt !== "string" ||
-      typeof parsed.sessionToken !== "string" ||
-      !isEvmAddress(parsed.address) ||
-      !isEvmAddress(address) ||
-      !isUsableSessionToken(parsed.sessionToken) ||
-      !isOptionalNonEmptyString(parsed.message) ||
-      !isOptionalNonEmptyString(parsed.signature)
+      !isWalletSession(parsed, now) ||
+      !isEvmAddress(address)
     ) {
       return null;
     }
@@ -37,8 +30,7 @@ export function parseCachedWalletAuth(
 
     if (
       Number.isNaN(expiresAt) ||
-      expiresAt - now <= SESSION_REFRESH_MARGIN_MS ||
-      expiresAt - now > MAX_SESSION_LIFETIME_MS
+      expiresAt - now <= SESSION_REFRESH_MARGIN_MS
     ) {
       return null;
     }
@@ -51,16 +43,4 @@ export function parseCachedWalletAuth(
 
 function isEvmAddress(value: string) {
   return /^0x[a-fA-F0-9]{40}$/.test(value);
-}
-
-function isUsableSessionToken(value: string) {
-  return (
-    value.length > 0 &&
-    value.length <= MAX_SESSION_TOKEN_CHARACTERS &&
-    !/\s/.test(value)
-  );
-}
-
-function isOptionalNonEmptyString(value: unknown) {
-  return value === undefined || (typeof value === "string" && Boolean(value.trim()));
 }

@@ -25,6 +25,23 @@ test("API URL helpers remove trailing separators and normalize paths", (t) => {
   assert.equal(getLangclawApiUrl("/api/chat"), "https://api.example.com/api/chat");
 });
 
+test("API URL helpers accept the documented same-origin rewrite path", (t) => {
+  const previous = process.env.NEXT_PUBLIC_LANGCLAW_API_URL;
+  t.after(() => {
+    if (previous === undefined) {
+      delete process.env.NEXT_PUBLIC_LANGCLAW_API_URL;
+    } else {
+      process.env.NEXT_PUBLIC_LANGCLAW_API_URL = previous;
+    }
+  });
+
+  process.env.NEXT_PUBLIC_LANGCLAW_API_URL = "/api/backend///";
+
+  assert.equal(getLangclawApiBaseUrl(), "/api/backend");
+  assert.equal(getLangclawApiUrl("health"), "/api/backend/health");
+  assert.equal(getLangclawApiUrl("/api/chat"), "/api/backend/api/chat");
+});
+
 test("API URL helpers reject unsafe backend origins", (t) => {
   const previous = process.env.NEXT_PUBLIC_LANGCLAW_API_URL;
   t.after(() => {
@@ -37,7 +54,12 @@ test("API URL helpers reject unsafe backend origins", (t) => {
 
   for (const value of [
     "javascript:alert(1)",
-    "/relative-backend",
+    "/",
+    "//attacker.example/api",
+    "/api/../attacker",
+    "/api\\backend",
+    "/api/backend?tenant=one",
+    "/api/backend#fragment",
     "https://user:secret@api.example.com",
     "https://api.example.com?tenant=one",
     "https://api.example.com#backend",
@@ -45,7 +67,7 @@ test("API URL helpers reject unsafe backend origins", (t) => {
     process.env.NEXT_PUBLIC_LANGCLAW_API_URL = value;
     assert.throws(
       () => getLangclawApiBaseUrl(),
-      /Backend URL must be an absolute HTTP or HTTPS URL/,
+      /Backend URL must be a safe same-origin path or an absolute HTTP or HTTPS URL/,
     );
   }
 });

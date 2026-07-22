@@ -8,6 +8,7 @@ const MAX_JSON_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_NDJSON_CHUNK_CHARACTERS = 1_048_576;
 const MAX_WALLET_SESSION_LIFETIME_MS = 13 * 60 * 60 * 1000;
 const MAX_WALLET_SESSION_TOKEN_CHARACTERS = 4_096;
+const SAME_ORIGIN_VALIDATION_BASE = "https://langclaw.invalid";
 
 export class LangclawApiError extends Error {
   code?: string;
@@ -30,6 +31,10 @@ export function getLangclawApiBaseUrl() {
 
   const candidate = configured.replace(/\/+$/, "");
 
+  if (isSafeSameOriginApiPath(candidate)) {
+    return candidate;
+  }
+
   try {
     const url = new URL(candidate);
 
@@ -44,12 +49,32 @@ export function getLangclawApiBaseUrl() {
     }
   } catch {
     throw new LangclawApiError(
-      "Backend URL must be an absolute HTTP or HTTPS URL without credentials, query, or fragment.",
+      "Backend URL must be a safe same-origin path or an absolute HTTP or HTTPS URL without credentials, query, or fragment.",
       500,
     );
   }
 
   return candidate;
+}
+
+function isSafeSameOriginApiPath(candidate: string) {
+  if (!candidate.startsWith("/") || candidate.startsWith("//")) {
+    return false;
+  }
+
+  try {
+    const url = new URL(candidate, SAME_ORIGIN_VALIDATION_BASE);
+
+    return (
+      candidate.length > 1 &&
+      url.origin === SAME_ORIGIN_VALIDATION_BASE &&
+      url.pathname === candidate &&
+      !url.search &&
+      !url.hash
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function getLangclawApiUrl(path: string) {

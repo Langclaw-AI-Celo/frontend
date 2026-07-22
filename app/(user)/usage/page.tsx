@@ -728,6 +728,7 @@ export default function UsagePage() {
       setTxHash(hash);
       setClaimSecret(depositClaimSecret);
       setReference(depositReference);
+      regenerateDepositClaim();
       toast.success("Deposit transaction sent", {
         description: `${shortHash(hash)} is waiting for confirmation.`,
       });

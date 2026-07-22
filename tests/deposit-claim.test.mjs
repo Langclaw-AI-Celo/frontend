@@ -87,3 +87,26 @@ test("Credits keeps the private claim off-chain and out of insecure randomness",
   assert.match(page, /setClaimSecret\(depositClaimSecret\)/);
   assert.doesNotMatch(claimModule, /Math\.random/);
 });
+
+test("Credits rotates the private claim after a deposit hash is accepted", () => {
+  const page = readFileSync(
+    new URL("../app/(user)/usage/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const hashAcceptedAt = page.indexOf("setDepositHash(hash);");
+  const successToastAt = page.indexOf(
+    'toast.success("Deposit transaction sent"',
+    hashAcceptedAt,
+  );
+  const acceptedHashTransition = page.slice(hashAcceptedAt, successToastAt);
+
+  assert.notEqual(hashAcceptedAt, -1);
+  assert.notEqual(successToastAt, -1);
+  assert.match(acceptedHashTransition, /setClaimSecret\(depositClaimSecret\)/);
+  assert.match(acceptedHashTransition, /setReference\(depositReference\)/);
+  assert.ok(
+    acceptedHashTransition.indexOf("regenerateDepositClaim();") >
+      acceptedHashTransition.indexOf("setReference(depositReference);"),
+    "rotate only after retaining the submitted claim for reconciliation",
+  );
+});

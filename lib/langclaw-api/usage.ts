@@ -262,8 +262,10 @@ function isUsageDeposit(
     isOptionalResponseString(value.chainName) &&
     isOptionalResponseString(value.nativeSymbol) &&
     matchesWalletAddress(value.wallet, input.wallet.address) &&
+    typeof value.credited === "boolean" &&
     (value.walletSession === undefined ||
-      (isWalletSession(value.walletSession) &&
+      (value.credited === true &&
+        isWalletSession(value.walletSession) &&
         matchesWalletAddress(
           value.walletSession.address,
           input.wallet.address,
@@ -273,7 +275,6 @@ function isUsageDeposit(
     isNonNegativeIntegerResponseString(value.amountNeuron) &&
     isNonNegativeDecimalResponseString(value.amount0G) &&
     isOptionalNonNegativeDecimalResponseString(value.amountNative) &&
-    typeof value.credited === "boolean" &&
     isNonNegativeIntegerResponseString(value.balanceBefore) &&
     isNonNegativeIntegerResponseString(value.balanceAfter)
   );

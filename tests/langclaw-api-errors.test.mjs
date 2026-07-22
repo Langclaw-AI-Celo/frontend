@@ -1509,6 +1509,54 @@ test("usage deposits reject malformed monetary values", async (t) => {
   }
 });
 
+test("usage deposits issue wallet sessions only for new credits", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const wallet = walletSessionRecord();
+  const txHash = `0x${"1".repeat(64)}`;
+  const walletSession = walletSessionRecord({ sessionToken: "deposit-session" });
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json(
+      usageDepositRecord({
+        balanceBefore: "1500000000",
+        credited: false,
+        walletSession,
+      }),
+    );
+
+  await assert.rejects(
+    verifyUsageDeposit({ chain: "celo", txHash, wallet }),
+    (error) =>
+      error instanceof LangclawApiError &&
+      error.message === "Backend returned invalid usage data." &&
+      error.status === 500,
+  );
+
+  globalThis.fetch = async () =>
+    Response.json(
+      usageDepositRecord({
+        balanceBefore: "1500000000",
+        credited: false,
+      }),
+    );
+
+  const duplicate = await verifyUsageDeposit({ chain: "celo", txHash, wallet });
+  assert.equal(duplicate.credited, false);
+  assert.equal(duplicate.walletSession, undefined);
+
+  globalThis.fetch = async () =>
+    Response.json(usageDepositRecord({ walletSession }));
+
+  assert.deepEqual(
+    (await verifyUsageDeposit({ chain: "celo", txHash, wallet })).walletSession,
+    walletSession,
+  );
+});
+
 test("usage vaults reject unsafe billing decimals", async (t) => {
   const originalFetch = globalThis.fetch;
 

@@ -69,7 +69,7 @@ function isWalletChallenge(value: unknown): value is WalletChallenge {
       ? Date.parse(challenge.expiresAt)
       : Number.NaN;
 
-  return (
+  const hasValidFields =
     isEvmAddressResponse(challenge.address) &&
     isPositiveResponseInteger(challenge.chainId) &&
     isNonEmptyResponseString(challenge.domain) &&
@@ -83,7 +83,33 @@ function isWalletChallenge(value: unknown): value is WalletChallenge {
     isNonEmptyResponseString(challenge.nonce) &&
     (challenge.purpose === "api-key:create" ||
       challenge.purpose === "session") &&
-    isNonEmptyResponseString(challenge.uri)
+    isNonEmptyResponseString(challenge.uri);
+
+  if (!hasValidFields) {
+    return false;
+  }
+
+  return hasConsistentWalletChallengeMessage(challenge as WalletChallenge);
+}
+
+function hasConsistentWalletChallengeMessage(challenge: WalletChallenge) {
+  const lines = challenge.message.split("\n");
+
+  return (
+    lines.length === 12 &&
+    lines[0] ===
+      `${challenge.domain} wants you to sign in with your Ethereum account:` &&
+    lines[1]?.toLowerCase() === challenge.address.toLowerCase() &&
+    lines[2] === "" &&
+    lines[3] === "Login to Langclaw" &&
+    lines[4] === "" &&
+    lines[5] === `URI: ${challenge.uri}` &&
+    lines[6] === "Version: 1" &&
+    lines[7] === `Chain ID: ${challenge.chainId}` &&
+    lines[8] === `Nonce: ${challenge.nonce}` &&
+    lines[9] === `Issued At: ${challenge.issuedAt}` &&
+    lines[10] === `Expiration Time: ${challenge.expiresAt}` &&
+    lines[11] === `Purpose: ${challenge.purpose}`
   );
 }
 

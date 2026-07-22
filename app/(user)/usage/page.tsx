@@ -82,6 +82,7 @@ import {
   validateDepositTransaction,
   validateWithdrawalTransaction,
 } from "@/lib/credits-validation";
+import { createDepositClaim } from "@/lib/deposit-claim";
 import { isMiniPayProvider } from "@/lib/minipay";
 import { cn } from "@/lib/utils";
 
@@ -161,11 +162,13 @@ export default function UsagePage() {
     null,
   );
   const [depositAmount, setDepositAmount] = useState("0.1");
+  const [depositClaimSecret, setDepositClaimSecret] = useState("");
   const [depositReference, setDepositReference] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [depositHash, setDepositHash] = useState<Hash | undefined>();
   const [withdrawHash, setWithdrawHash] = useState<Hash | undefined>();
   const [txHash, setTxHash] = useState("");
+  const [claimSecret, setClaimSecret] = useState("");
   const [reference, setReference] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState("");
@@ -339,13 +342,20 @@ export default function UsagePage() {
     !isConfirmingWithdraw &&
     loading !== "onchain-withdraw";
 
+  const regenerateDepositClaim = useCallback(() => {
+    const claim = createDepositClaim();
+
+    setDepositClaimSecret(claim.claimSecret);
+    setDepositReference(claim.reference);
+  }, []);
+
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      setDepositReference(createBytes32Reference());
+      regenerateDepositClaim();
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, []);
+  }, [regenerateDepositClaim]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -521,7 +531,14 @@ export default function UsagePage() {
   };
 
   const handleVerifyDeposit = useCallback(
-    async (options: { hash?: string; reference?: string; silent?: boolean } = {}) => {
+    async (
+      options: {
+        claimSecret?: string;
+        hash?: string;
+        reference?: string;
+        silent?: boolean;
+      } = {},
+    ) => {
       const hash = options.hash ?? (txHash.trim() || depositHash);
 
       if (!hash) {
@@ -537,6 +554,8 @@ export default function UsagePage() {
         const wallet = await getUsageWalletAuth();
         const payload = await verifyUsageDeposit({
           chain: selectedChain,
+          claimSecret:
+            options.claimSecret ?? (claimSecret.trim() || undefined),
           reference: options.reference ?? (reference.trim() || undefined),
           txHash: hash,
           wallet,
@@ -564,6 +583,7 @@ export default function UsagePage() {
     },
     [
       billingSymbol,
+      claimSecret,
       depositHash,
       getUsageWalletAuth,
       reference,
@@ -586,6 +606,7 @@ export default function UsagePage() {
     void verifyConfirmedAttribution(depositHash);
     const timeoutId = window.setTimeout(() => {
       void handleVerifyDeposit({
+        claimSecret,
         hash: depositHash,
         reference,
         silent: true,
@@ -597,12 +618,19 @@ export default function UsagePage() {
     depositHash,
     handleVerifyDeposit,
     isDepositConfirmed,
+    claimSecret,
     reference,
     verifyConfirmedAttribution,
   ]);
 
   const handleSendDeposit = async () => {
     const depositVaultAddress = vaultInfo?.vaultAddress;
+
+    if (!depositClaimSecret) {
+      showError(setError, "Generate a private deposit claim first.");
+      return;
+    }
+
     const validationError = validateDepositTransaction({
       amount: parsedDepositAmount,
       billingSymbol,
@@ -698,6 +726,7 @@ export default function UsagePage() {
 
       setDepositHash(hash);
       setTxHash(hash);
+      setClaimSecret(depositClaimSecret);
       setReference(depositReference);
       toast.success("Deposit transaction sent", {
         description: `${shortHash(hash)} is waiting for confirmation.`,
@@ -1104,14 +1133,20 @@ export default function UsagePage() {
                   onCopy={setCopied}
                   value={depositReference}
                 />
+                <CopyField
+                  copied={copied}
+                  label="Private claim. Keep secret"
+                  onCopy={setCopied}
+                  value={depositClaimSecret}
+                />
                 <Button
                   className="w-full sm:w-fit"
-                  onClick={() => setDepositReference(createBytes32Reference())}
+                  onClick={regenerateDepositClaim}
                   size="sm"
                   type="button"
                   variant="ghost"
                 >
-                  Generate reference
+                  Generate new claim
                 </Button>
               </details>
             </div>
@@ -1179,9 +1214,28 @@ export default function UsagePage() {
                 value={reference}
               />
             </div>
+            <div className="flex flex-col gap-1">
+              <label
+                className="text-muted-foreground text-sm"
+                htmlFor="existing-deposit-claim"
+              >
+                Private claim
+              </label>
+              <Input
+                autoComplete="off"
+                id="existing-deposit-claim"
+                name="existingDepositClaim"
+                onChange={(event) => setClaimSecret(event.currentTarget.value)}
+                placeholder="private claim for address-only verification"
+                spellCheck={false}
+                type="password"
+                value={claimSecret}
+              />
+            </div>
             <p className="text-muted-foreground text-xs">
-              Use this for deposits sent outside the app. If you used a
-              reference, paste the same value.
+              Paste the reference for deposits sent outside the app. MiniPay
+              also needs the private claim. A signed or cached wallet session
+              can omit it.
             </p>
             {deposit && (
               <div className="rounded-md border bg-muted/30 p-3 text-sm">
@@ -1533,20 +1587,6 @@ function shortHash(value?: string) {
   return value && value.length > 16
     ? `${value.slice(0, 10)}...${value.slice(-6)}`
     : value;
-}
-
-function createBytes32Reference() {
-  const bytes = new Uint8Array(32);
-
-  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-    crypto.getRandomValues(bytes);
-  } else {
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Math.floor(Math.random() * 256);
-    }
-  }
-
-  return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function formatBillingUnits(value: bigint, decimals: number) {

@@ -63,6 +63,7 @@ export async function getUsageVaultInfo(chain?: ProductChainId) {
 
 export async function verifyUsageDeposit(input: {
   chain?: ProductChainId;
+  claimSecret?: string;
   reference?: string;
   txHash: string;
   wallet: WalletAuth;

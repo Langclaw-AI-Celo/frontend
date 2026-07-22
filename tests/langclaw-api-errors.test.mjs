@@ -294,6 +294,85 @@ test("wallet challenge responses reject malformed signing data", async (t) => {
   }
 });
 
+test("wallet challenge responses reject signed message metadata mismatches", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const challenge = walletChallengeRecord();
+  const request = {
+    address: challenge.address,
+    chainId: challenge.chainId,
+    purpose: challenge.purpose,
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const [expected, replacement] of [
+    [challenge.domain, "evil.example"],
+    [challenge.address, "0x2222222222222222222222222222222222222222"],
+    ["Login to Langclaw", "Authorize another application"],
+    [`URI: ${challenge.uri}`, "URI: https://evil.example"],
+    ["Version: 1", "Version: 2"],
+    [`Chain ID: ${challenge.chainId}`, "Chain ID: 5000"],
+    [`Nonce: ${challenge.nonce}`, "Nonce: attacker-nonce"],
+    [`Issued At: ${challenge.issuedAt}`, "Issued At: 2000-01-01T00:00:00.000Z"],
+    [
+      `Expiration Time: ${challenge.expiresAt}`,
+      "Expiration Time: 2099-01-01T00:00:00.000Z",
+    ],
+    [`Purpose: ${challenge.purpose}`, "Purpose: api-key:create"],
+    [challenge.message, `${challenge.message}\nUnexpected: value`],
+  ]) {
+    globalThis.fetch = async () =>
+      Response.json({
+        challenge: {
+          ...challenge,
+          message: challenge.message.replace(expected, replacement),
+        },
+        configured: true,
+      });
+
+    await assert.rejects(
+      requestWalletChallenge(request),
+      (error) =>
+        error instanceof LangclawApiError &&
+        error.message === "Backend returned invalid wallet challenge data." &&
+        error.status === 500,
+    );
+  }
+});
+
+test("wallet challenge messages accept checksum casing and supported purposes", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const checksumAddress = "0x52908400098527886E0F7030069857D2E4169EE7";
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  for (const purpose of ["session", "api-key:create"]) {
+    const challenge = walletChallengeRecord({
+      address: checksumAddress.toLowerCase(),
+      purpose,
+    });
+    challenge.message = challenge.message.replace(
+      challenge.address,
+      checksumAddress,
+    );
+    globalThis.fetch = async () =>
+      Response.json({ challenge, configured: true });
+
+    assert.deepEqual(
+      await requestWalletChallenge({
+        address: checksumAddress,
+        chainId: challenge.chainId,
+        purpose,
+      }),
+      challenge,
+    );
+  }
+});
+
 test("wallet auth responses reject malformed configuration envelopes", async (t) => {
   const originalFetch = globalThis.fetch;
   const challenge = walletChallengeRecord();
@@ -2973,19 +3052,41 @@ function chatSessionRecord(overrides = {}) {
 
 function walletChallengeRecord(overrides = {}) {
   const now = Date.now();
-
-  return {
+  const challenge = {
     address: "0x1111111111111111111111111111111111111111",
     chainId: 42220,
     domain: "langclawcelo.vercel.app",
     expiresAt: new Date(now + 4 * 60 * 1000).toISOString(),
     issuedAt: new Date(now - 60 * 1000).toISOString(),
-    message: "Sign in to Langclaw.",
     nonce: "nonce-1",
     purpose: "session",
     uri: "https://langclawcelo.vercel.app",
     ...overrides,
   };
+
+  return {
+    ...challenge,
+    message: Object.hasOwn(overrides, "message")
+      ? overrides.message
+      : walletChallengeMessage(challenge),
+  };
+}
+
+function walletChallengeMessage(challenge) {
+  return [
+    `${challenge.domain} wants you to sign in with your Ethereum account:`,
+    challenge.address,
+    "",
+    "Login to Langclaw",
+    "",
+    `URI: ${challenge.uri}`,
+    "Version: 1",
+    `Chain ID: ${challenge.chainId}`,
+    `Nonce: ${challenge.nonce}`,
+    `Issued At: ${challenge.issuedAt}`,
+    `Expiration Time: ${challenge.expiresAt}`,
+    `Purpose: ${challenge.purpose}`,
+  ].join("\n");
 }
 
 function walletSessionRecord(overrides = {}) {

@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertCircle,
   BrainCircuit,
@@ -33,15 +40,32 @@ import {
   type MemoryStats,
   type MemoryStatus,
 } from "@/lib/langclaw-api";
+import { createMemoryRequestCoordinator } from "@/lib/latest-request";
 import { MemoryDataTable } from "./data-table";
 
+const EMPTY_MEMORIES: MemoryItem[] = [];
+
 export default function Page() {
-  const { getWalletAuth, isConnected, isSigning, openWalletModal } =
+  const { address, getWalletAuth, isConnected, isSigning, openWalletModal } =
     useWalletSession();
-  const [memories, setMemories] = useState<MemoryItem[]>([]);
-  const [backendStats, setBackendStats] = useState<MemoryStats | null>(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState("");
+  const [memoriesState, setMemories] = useState<MemoryItem[]>([]);
+  const [backendStatsState, setBackendStats] =
+    useState<MemoryStats | null>(null);
+  const [errorState, setError] = useState("");
+  const [loadingState, setLoading] = useState("");
+  const [memoryContext, setMemoryContext] = useState("");
+  const walletContext =
+    isConnected && address ? address.trim().toLowerCase() : "";
+  const memoryRequestsRef = useRef(
+    createMemoryRequestCoordinator(walletContext),
+  );
+  const memoryContextRef = useRef("");
+  const accountStateIsCurrent =
+    Boolean(walletContext) && memoryContext === walletContext;
+  const memories = accountStateIsCurrent ? memoriesState : EMPTY_MEMORIES;
+  const backendStats = accountStateIsCurrent ? backendStatsState : null;
+  const error = accountStateIsCurrent ? errorState : "";
+  const loading = accountStateIsCurrent ? loadingState : "";
 
   const stats = useMemo(
     () => backendStats ?? buildMemoryStats(memories),
@@ -78,70 +102,179 @@ export default function Page() {
     [stats],
   );
 
+  const getWalletForContext = useCallback(
+    async (requestContext: string) => {
+      const wallet = await getWalletAuth();
+
+      if (
+        !memoryRequestsRef.current.isCurrentContext(requestContext) ||
+        wallet.address.trim().toLowerCase() !== requestContext
+      ) {
+        return null;
+      }
+
+      return wallet;
+    },
+    [getWalletAuth],
+  );
+
   const loadMemories = useCallback(async () => {
-    if (!isConnected) {
-      setMemories([]);
-      setBackendStats(null);
-      setError("");
+    const requestContext = walletContext;
+
+    if (!memoryRequestsRef.current.isCurrentContext(requestContext)) {
       return;
     }
 
     setLoading("load");
     setError("");
 
-    try {
-      const wallet = await getWalletAuth();
-      const dashboard = await getMemoryDashboard(wallet);
-      setMemories(dashboard.memories);
-      setBackendStats(dashboard.stats);
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to load memories.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
-  }, [getWalletAuth, isConnected]);
+    await memoryRequestsRef.current.runLoad(
+      requestContext,
+      async () => {
+        const wallet = await getWalletForContext(requestContext);
+
+        if (!wallet) {
+          return null;
+        }
+
+        return getMemoryDashboard(wallet);
+      },
+      {
+        onError: (err) => {
+          const message = readFriendlyError(err, "Unable to load memories.");
+          setError(message);
+          toast.error(message);
+        },
+        onSettled: () =>
+          setLoading((current) => (current === "load" ? "" : current)),
+        onSuccess: (dashboard) => {
+          if (!dashboard) {
+            return;
+          }
+
+          memoryContextRef.current = requestContext;
+          setMemoryContext(requestContext);
+          setMemories(dashboard.memories);
+          setBackendStats(dashboard.stats);
+        },
+      },
+    );
+  }, [getWalletForContext, walletContext]);
+
+  useLayoutEffect(() => {
+    memoryRequestsRef.current.setContext(walletContext);
+    memoryContextRef.current = "";
+  }, [walletContext]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      void loadMemories();
+      setMemories([]);
+      setBackendStats(null);
+      setError("");
+      setLoading("");
+      memoryContextRef.current = walletContext;
+      setMemoryContext(walletContext);
+
+      if (walletContext) {
+        void loadMemories();
+      }
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [loadMemories]);
+  }, [loadMemories, walletContext]);
 
-  const requireWallet = useCallback(async () => {
-    if (!isConnected) {
-      openWalletModal();
-      throw new Error("Choose a wallet to manage memories.");
-    }
+  useEffect(() => {
+    const memoryRequests = memoryRequestsRef.current;
 
-    return getWalletAuth();
-  }, [getWalletAuth, isConnected, openWalletModal]);
+    return () => {
+      memoryRequests.invalidateAll();
+    };
+  }, []);
+
+  const runMemoryMutation = useCallback(
+    async <T,>(
+      nextLoadingState: string,
+      fallbackError: string,
+      operation: (
+        wallet: NonNullable<Awaited<ReturnType<typeof getWalletForContext>>>,
+      ) => Promise<T>,
+      onSuccess: (value: T, requestContext: string) => void,
+    ) => {
+      const requestContext = walletContext;
+
+      if (!requestContext) {
+        const message = "Choose a wallet to manage memories.";
+        setError(message);
+        toast.error(message);
+        openWalletModal();
+        return false;
+      }
+
+      if (
+        !memoryRequestsRef.current.isCurrentContext(requestContext) ||
+        memoryContextRef.current !== requestContext
+      ) {
+        return false;
+      }
+
+      setLoading(nextLoadingState);
+      setError("");
+
+      return memoryRequestsRef.current.runMutation(
+        requestContext,
+        memoryContextRef.current,
+        async () => {
+          const wallet = await getWalletForContext(requestContext);
+
+          if (!wallet) {
+            return null;
+          }
+
+          return { value: await operation(wallet) };
+        },
+        {
+          onError: (err) => {
+            const message = readFriendlyError(err, fallbackError);
+            setError(message);
+            toast.error(message);
+          },
+          onSettled: () =>
+            setLoading((current) =>
+              current === nextLoadingState ? "" : current,
+            ),
+          onSuccess: (result) => {
+            if (result) {
+              onSuccess(result.value, requestContext);
+            }
+          },
+        },
+      );
+    },
+    [getWalletForContext, openWalletModal, walletContext],
+  );
 
   const handleStatusChange = useCallback(
     async (memory: MemoryItem, status: MemoryStatus) => {
-      setLoading(`status:${memory.id}`);
-      setError("");
+      const memoryId = memory.id;
 
-      try {
-        const wallet = await requireWallet();
-        const updated = await setMemoryStatus(wallet, memory.id, status);
-        setMemories((current) =>
-          current.map((item) => (item.id === updated.id ? updated : item)),
-        );
-        setBackendStats(null);
-        toast.success(status === "active" ? "Memory enabled" : "Memory disabled");
-      } catch (err) {
-        const message = readFriendlyError(err, "Unable to update memory.");
-        setError(message);
-        toast.error(message);
-      } finally {
-        setLoading("");
-      }
+      await runMemoryMutation(
+        `status:${memoryId}`,
+        "Unable to update memory.",
+        (wallet) => setMemoryStatus(wallet, memoryId, status),
+        (updated, requestContext) => {
+          memoryContextRef.current = requestContext;
+          setMemoryContext(requestContext);
+          setMemories((current) =>
+            current.map((item) => (item.id === updated.id ? updated : item)),
+          );
+          setBackendStats(null);
+          toast.success(
+            status === "active" ? "Memory enabled" : "Memory disabled",
+          );
+        },
+      );
     },
-    [requireWallet],
+    [runMemoryMutation],
   );
 
   const handleStatusChangeMany = useCallback(
@@ -150,53 +283,52 @@ export default function Page() {
         return;
       }
 
-      setLoading("bulk-status");
-      setError("");
+      const requestedIds = [...memoryIds];
 
-      try {
-        const wallet = await requireWallet();
-        const updated = await setManyMemoryStatuses(wallet, memoryIds, status);
-        const updatedById = new Map(updated.map((memory) => [memory.id, memory]));
+      await runMemoryMutation(
+        "bulk-status",
+        "Unable to update memories.",
+        (wallet) => setManyMemoryStatuses(wallet, requestedIds, status),
+        (updated, requestContext) => {
+          const updatedById = new Map(
+            updated.map((memory) => [memory.id, memory]),
+          );
 
-        setMemories((current) =>
-          current.map((memory) => updatedById.get(memory.id) ?? memory),
-        );
-        setBackendStats(null);
-        toast.success("Selected memories updated");
-      } catch (err) {
-        const message = readFriendlyError(err, "Unable to update memories.");
-        setError(message);
-        toast.error(message);
-      } finally {
-        setLoading("");
-      }
+          memoryContextRef.current = requestContext;
+          setMemoryContext(requestContext);
+          setMemories((current) =>
+            current.map((memory) => updatedById.get(memory.id) ?? memory),
+          );
+          setBackendStats(null);
+          toast.success("Selected memories updated");
+        },
+      );
     },
-    [requireWallet],
+    [runMemoryMutation],
   );
 
   const handleDelete = useCallback(
     async (memory: MemoryItem) => {
-      setLoading(`delete:${memory.id}`);
-      setError("");
+      const memoryId = memory.id;
 
-      try {
-        const wallet = await requireWallet();
-        const deletedIds = await deleteMemoryRecord(wallet, memory.id);
-        const deletedSet = new Set(deletedIds);
-        setMemories((current) =>
-          current.filter((item) => !deletedSet.has(item.id)),
-        );
-        setBackendStats(null);
-        toast.success("Memory deleted");
-      } catch (err) {
-        const message = readFriendlyError(err, "Unable to delete memory.");
-        setError(message);
-        toast.error(message);
-      } finally {
-        setLoading("");
-      }
+      await runMemoryMutation(
+        `delete:${memoryId}`,
+        "Unable to delete memory.",
+        (wallet) => deleteMemoryRecord(wallet, memoryId),
+        (deletedIds, requestContext) => {
+          const deletedSet = new Set(deletedIds);
+
+          memoryContextRef.current = requestContext;
+          setMemoryContext(requestContext);
+          setMemories((current) =>
+            current.filter((item) => !deletedSet.has(item.id)),
+          );
+          setBackendStats(null);
+          toast.success("Memory deleted");
+        },
+      );
     },
-    [requireWallet],
+    [runMemoryMutation],
   );
 
   const handleDeleteMany = useCallback(
@@ -205,27 +337,26 @@ export default function Page() {
         return;
       }
 
-      setLoading("bulk-delete");
-      setError("");
+      const requestedIds = [...memoryIds];
 
-      try {
-        const wallet = await requireWallet();
-        const deletedIds = await deleteManyMemoryRecords(wallet, memoryIds);
-        const deletedSet = new Set(deletedIds);
-        setMemories((current) =>
-          current.filter((item) => !deletedSet.has(item.id)),
-        );
-        setBackendStats(null);
-        toast.success("Selected memories deleted");
-      } catch (err) {
-        const message = readFriendlyError(err, "Unable to delete memories.");
-        setError(message);
-        toast.error(message);
-      } finally {
-        setLoading("");
-      }
+      await runMemoryMutation(
+        "bulk-delete",
+        "Unable to delete memories.",
+        (wallet) => deleteManyMemoryRecords(wallet, requestedIds),
+        (deletedIds, requestContext) => {
+          const deletedSet = new Set(deletedIds);
+
+          memoryContextRef.current = requestContext;
+          setMemoryContext(requestContext);
+          setMemories((current) =>
+            current.filter((item) => !deletedSet.has(item.id)),
+          );
+          setBackendStats(null);
+          toast.success("Selected memories deleted");
+        },
+      );
     },
-    [requireWallet],
+    [runMemoryMutation],
   );
 
   const busy = Boolean(loading) || isSigning;
@@ -295,6 +426,7 @@ export default function Page() {
       </section>
 
       <MemoryDataTable
+        key={walletContext || "disconnected"}
         data={memories}
         disabled={!isConnected || busy}
         onDelete={handleDelete}

@@ -30,6 +30,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -160,6 +161,7 @@ import {
   isTelegramLinkRequiredError,
   useTelegramConnectGate,
 } from "@/components/TelegramConnectDialog";
+import { createChatSessionsRequestCoordinator } from "@/lib/latest-request";
 import { cn } from "@/lib/utils";
 
 type ChatProps = {
@@ -203,8 +205,14 @@ const alphaChartConfig = {
 } satisfies ChartConfig;
 
 const Chat = ({ sessionId }: ChatProps) => {
-  const { clearWalletAuth, getWalletAuth, isConnected, isSigning, openWalletModal } =
-    useWalletSession();
+  const {
+    address,
+    clearWalletAuth,
+    getWalletAuth,
+    isConnected,
+    isSigning,
+    openWalletModal,
+  } = useWalletSession();
   const {
     dialog: telegramDialog,
     openTelegramDialog,
@@ -217,39 +225,85 @@ const Chat = ({ sessionId }: ChatProps) => {
   const [loading, setLoading] = useState(Boolean(sessionId));
   const [error, setError] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [sessionContext, setSessionContext] = useState("");
   const [speechSegments, setSpeechSegments] = useState<TranscriptionSegments>(
     [],
   );
   const [pendingRetryMessageId, setPendingRetryMessageId] = useState<
     string | null
   >(null);
+  const walletContext =
+    isConnected && address ? address.trim().toLowerCase() : "";
+  const chatRequestsRef = useRef(
+    createChatSessionsRequestCoordinator(walletContext),
+  );
   const sessionRef = useRef<ChatSession | null>(null);
+  const sessionContextRef = useRef("");
+  const activeChatContextRef = useRef("");
   const pendingStartedRef = useRef(false);
 
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
 
-  const persistSession = useCallback(
-    async (nextSession: ChatSession) => {
-      if (!isConnected) {
-        openWalletModal();
-        const message = "Choose a wallet to save this chat.";
-        setSaveError(message);
-        toast.error(message);
-        return;
+  const getWalletForContext = useCallback(
+    async (requestContext: string) => {
+      const wallet = await getWalletAuth();
+
+      if (
+        !chatRequestsRef.current.isCurrentContext(requestContext) ||
+        wallet.address.trim().toLowerCase() !== requestContext
+      ) {
+        throw new Error("Wallet changed before the chat request completed.");
       }
 
-      const wallet = await getWalletAuth();
-      await upsertChatSession(wallet, nextSession);
-      dispatchChatSessionsUpdated();
-      setSaveError("");
+      return wallet;
     },
-    [getWalletAuth, isConnected, openWalletModal],
+    [getWalletAuth],
+  );
+
+  const persistSession = useCallback(
+    async (nextSession: ChatSession, requestContext: string) => {
+      if (
+        !requestContext ||
+        sessionContextRef.current !== requestContext
+      ) {
+        return false;
+      }
+
+      return chatRequestsRef.current.runMutation(
+        requestContext,
+        sessionContextRef.current,
+        async () => {
+          const wallet = await getWalletForContext(requestContext);
+          await upsertChatSession(wallet, nextSession);
+          return true;
+        },
+        {
+          onError: (saveError) => {
+            const message =
+              saveError instanceof Error
+                ? saveError.message
+                : "Unable to save chat.";
+            setSaveError(message);
+            toast.error(message);
+          },
+          onSuccess: (saved) => {
+            if (!saved) {
+              return;
+            }
+
+            dispatchChatSessionsUpdated();
+            setSaveError("");
+          },
+        },
+      );
+    },
+    [getWalletForContext],
   );
 
   const {
-    error: chatError,
+    clearError,
     messages,
     regenerate,
     sendMessage,
@@ -259,6 +313,15 @@ const Chat = ({ sessionId }: ChatProps) => {
   } = useChat<LangclawUIMessage>({
     id: sessionId,
     onError: (err) => {
+      const requestContext = activeChatContextRef.current;
+
+      if (
+        !requestContext ||
+        !chatRequestsRef.current.isCurrentContext(requestContext)
+      ) {
+        return;
+      }
+
       if (isTelegramLinkRequiredError(err)) {
         openTelegramDialog();
       }
@@ -267,6 +330,16 @@ const Chat = ({ sessionId }: ChatProps) => {
       toast.error(err.message);
     },
     onFinish: ({ isAbort, messages: finishedMessages }) => {
+      const requestContext = activeChatContextRef.current;
+
+      if (
+        !requestContext ||
+        !chatRequestsRef.current.isCurrentContext(requestContext) ||
+        sessionContextRef.current !== requestContext
+      ) {
+        return;
+      }
+
       const finalMessages = isAbort
         ? markLatestAssistantStopped(finishedMessages)
         : finishedMessages;
@@ -277,31 +350,68 @@ const Chat = ({ sessionId }: ChatProps) => {
       const nextSession = updateSessionMessages(baseSession, storedMessages);
 
       sessionRef.current = nextSession;
+      sessionContextRef.current = requestContext;
       setSession(nextSession);
+      setSessionContext(requestContext);
 
-      void persistSession(nextSession).catch((saveErr) => {
-        const message =
-          saveErr instanceof Error ? saveErr.message : "Unable to save chat.";
-        setSaveError(message);
-        toast.error(message);
-      });
+      void persistSession(nextSession, requestContext);
     },
     transport,
   });
 
+  const stopRef = useRef(stop);
+
+  useLayoutEffect(() => {
+    const chatRequests = chatRequestsRef.current;
+
+    chatRequests.invalidateAll();
+    chatRequestsRef.current.setContext(walletContext);
+    activeChatContextRef.current = "";
+    sessionContextRef.current = "";
+    sessionRef.current = null;
+    pendingStartedRef.current = false;
+    stopRef.current();
+    clearError();
+  }, [clearError, sessionId, walletContext]);
+
+  useLayoutEffect(() => {
+    stopRef.current = stop;
+  }, [stop]);
+
+  useEffect(() => {
+    const chatRequests = chatRequestsRef.current;
+
+    return () => {
+      activeChatContextRef.current = "";
+      sessionContextRef.current = "";
+      chatRequests.invalidateAll();
+      stopRef.current();
+    };
+  }, []);
+
+  const sessionStateIsCurrent = sessionContext === walletContext;
+  const messagesForWallet = useMemo(
+    () => (sessionStateIsCurrent ? messages : []),
+    [messages, sessionStateIsCurrent],
+  );
+  const loadingForWallet =
+    Boolean(sessionId && walletContext) &&
+    (loading || !sessionStateIsCurrent);
+  const errorForWallet = sessionStateIsCurrent ? error : "";
+  const saveErrorForWallet = sessionStateIsCurrent ? saveError : "";
   const storedMessages = useMemo(
-    () => uiMessagesToStoredMessages(messages),
-    [messages],
+    () => uiMessagesToStoredMessages(messagesForWallet),
+    [messagesForWallet],
   );
   const visibleMessages = useMemo(
     () =>
-      messages.filter(
+      messagesForWallet.filter(
         (
           message,
         ): message is LangclawUIMessage & { role: "assistant" | "user" } =>
           message.role === "assistant" || message.role === "user",
       ),
-    [messages],
+    [messagesForWallet],
   );
   const estimatedContextTokens = useMemo(
     () =>
@@ -320,7 +430,12 @@ const Chat = ({ sessionId }: ChatProps) => {
         return;
       }
 
-      if (!isConnected) {
+      const requestContext = walletContext;
+
+      if (
+        !requestContext ||
+        !chatRequestsRef.current.isCurrentContext(requestContext)
+      ) {
         openWalletModal();
         showError(
           setError,
@@ -331,19 +446,30 @@ const Chat = ({ sessionId }: ChatProps) => {
 
       const selectedToolMode = options.toolMode ?? toolMode;
       const baseSession =
-        sessionRef.current ??
-        createChatSession(content, sessionId ?? undefined);
+        sessionContextRef.current === requestContext && sessionRef.current
+          ? sessionRef.current
+          : createChatSession(content, sessionId ?? undefined);
 
       setError("");
       setSaveError("");
       setSpeechSegments([]);
+      activeChatContextRef.current = requestContext;
       sessionRef.current = baseSession;
+      sessionContextRef.current = requestContext;
       setSession(baseSession);
+      setSessionContext(requestContext);
 
       const sendWithWallet = async (forceWalletSignature = false) => {
         const wallet = await requireTelegramLinkedWallet({
           force: forceWalletSignature,
         });
+
+        if (
+          !chatRequestsRef.current.isCurrentContext(requestContext) ||
+          wallet.address.trim().toLowerCase() !== requestContext
+        ) {
+          return false;
+        }
 
         await sendMessage(
           { text: content },
@@ -357,20 +483,35 @@ const Chat = ({ sessionId }: ChatProps) => {
             },
           },
         );
+
+        return true;
       };
 
       try {
         await sendWithWallet();
       } catch (err) {
+        if (!chatRequestsRef.current.isCurrentContext(requestContext)) {
+          return;
+        }
+
         if (isWalletSignatureRequiredError(err)) {
           try {
             clearWalletAuth();
-            await sendWithWallet(true);
+            const sent = await sendWithWallet(true);
+
+            if (!sent) {
+              return;
+            }
+
             toast.success("Wallet signature refreshed", {
               description: "Sending your message now.",
             });
             return;
           } catch (retryErr) {
+            if (!chatRequestsRef.current.isCurrentContext(requestContext)) {
+              return;
+            }
+
             showError(
               setError,
               readFriendlyError(retryErr, "Unable to start the chat."),
@@ -391,72 +532,99 @@ const Chat = ({ sessionId }: ChatProps) => {
     },
     [
       clearWalletAuth,
-      isConnected,
       openWalletModal,
       requireTelegramLinkedWallet,
       sendMessage,
       sessionId,
       status,
       toolMode,
+      walletContext,
     ],
   );
 
   useEffect(() => {
-    if (!sessionId) {
-      return;
-    }
+    const timeoutId = window.setTimeout(() => {
+      setSession(null);
+      setSessionContext("");
+      setMessages([]);
+      setInput("");
+      setSpeechSegments([]);
+      setPendingRetryMessageId(null);
+      setError("");
+      setSaveError("");
+      setLoading(Boolean(sessionId && walletContext));
 
-    let active = true;
-
-    const loadSession = async () => {
-      if (!isConnected) {
-        openWalletModal();
-        showError(setError, "Choose a wallet to load saved chats.");
-        setLoading(false);
+      if (!sessionId) {
         return;
       }
 
-      setLoading(true);
-      setError("");
+      const loadSession = async () => {
+        const requestContext = walletContext;
 
-      try {
-        const wallet = await getWalletAuth();
-        const loadedSession = await getChatSession(wallet, sessionId);
-        const nextSession =
-          loadedSession ?? createChatSession("New Chat", sessionId);
+        if (!requestContext) {
+          if (!isConnected) {
+            openWalletModal();
+            showError(setError, "Choose a wallet to load saved chats.");
+          }
 
-        if (!active) {
-          return;
-        }
-
-        sessionRef.current = nextSession;
-        setSession(nextSession);
-        setMessages(storedMessagesToUIMessages(nextSession.messages));
-      } catch (err) {
-        if (!active) {
-          return;
-        }
-
-        showError(
-          setError,
-          readFriendlyError(err, "Unable to load chat session."),
-        );
-      } finally {
-        if (active) {
           setLoading(false);
+          return;
         }
-      }
-    };
 
-    void loadSession();
+        await chatRequestsRef.current.runLoad(
+          requestContext,
+          async () => {
+            const wallet = await getWalletForContext(requestContext);
+            const loadedSession = await getChatSession(wallet, sessionId);
 
-    return () => {
-      active = false;
-    };
-  }, [getWalletAuth, isConnected, openWalletModal, sessionId, setMessages]);
+            return loadedSession ?? createChatSession("New Chat", sessionId);
+          },
+          {
+            onError: (loadError) => {
+              sessionRef.current = null;
+              sessionContextRef.current = requestContext;
+              setSession(null);
+              setSessionContext(requestContext);
+              setMessages([]);
+              showError(
+                setError,
+                readFriendlyError(loadError, "Unable to load chat session."),
+              );
+            },
+            onSettled: () => setLoading(false),
+            onSuccess: (nextSession) => {
+              sessionRef.current = nextSession;
+              sessionContextRef.current = requestContext;
+              setSession(nextSession);
+              setSessionContext(requestContext);
+              setMessages(storedMessagesToUIMessages(nextSession.messages));
+              setError("");
+            },
+          },
+        );
+      };
+
+      void loadSession();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    getWalletForContext,
+    isConnected,
+    openWalletModal,
+    sessionId,
+    setMessages,
+    walletContext,
+  ]);
 
   useEffect(() => {
-    if (!sessionId || loading || pendingStartedRef.current) {
+    if (
+      !sessionId ||
+      loadingForWallet ||
+      !walletContext ||
+      sessionContextRef.current !== walletContext ||
+      pendingStartedRef.current
+    ) {
       return;
     }
 
@@ -474,7 +642,7 @@ const Chat = ({ sessionId }: ChatProps) => {
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [loading, sessionId, submitMessage]);
+  }, [loadingForWallet, sessionId, submitMessage, walletContext]);
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -515,16 +683,26 @@ const Chat = ({ sessionId }: ChatProps) => {
   }, []);
 
   const handleStop = useCallback(() => {
+    if (
+      !walletContext ||
+      activeChatContextRef.current !== walletContext ||
+      sessionContextRef.current !== walletContext
+    ) {
+      return;
+    }
+
     stop();
     setMessages((currentMessages) =>
       markLatestAssistantStopped(currentMessages),
     );
     toast.info("Generation stopped");
-  }, [setMessages, stop]);
+  }, [setMessages, stop, walletContext]);
 
   const handleRetry = useCallback(
     async (messageId: string) => {
-      if (!isConnected) {
+      const requestContext = walletContext;
+
+      if (!requestContext) {
         openWalletModal();
         showError(
           setError,
@@ -533,11 +711,30 @@ const Chat = ({ sessionId }: ChatProps) => {
         return;
       }
 
+      if (
+        !chatRequestsRef.current.isCurrentContext(requestContext) ||
+        sessionContextRef.current !== requestContext
+      ) {
+        return;
+      }
+
+      activeChatContextRef.current = requestContext;
+
       const retryWithWallet = async (forceWalletSignature = false) => {
         const wallet = await requireTelegramLinkedWallet({
           force: forceWalletSignature,
         });
-        const originalMessage = uiMessagesToStoredMessages(messages).find(
+
+        if (
+          !chatRequestsRef.current.isCurrentContext(requestContext) ||
+          wallet.address.trim().toLowerCase() !== requestContext
+        ) {
+          return null;
+        }
+
+        const originalMessage = uiMessagesToStoredMessages(
+          messagesForWallet,
+        ).find(
           (message) => message.id === messageId,
         );
         const retryMode =
@@ -556,6 +753,10 @@ const Chat = ({ sessionId }: ChatProps) => {
           messageId,
         });
 
+        if (!chatRequestsRef.current.isCurrentContext(requestContext)) {
+          return null;
+        }
+
         return { retryMode };
       };
 
@@ -563,26 +764,44 @@ const Chat = ({ sessionId }: ChatProps) => {
         setError("");
         setSaveError("");
         setPendingRetryMessageId(null);
-        const { retryMode } = await retryWithWallet();
+        const retry = await retryWithWallet();
+
+        if (!retry) {
+          return;
+        }
+
         toast.info("Retry started", {
           description:
-            retryMode === "research"
+            retry.retryMode === "research"
               ? "Research mode"
                 : FIXED_CHAT_MODEL_LABEL,
         });
       } catch (err) {
+        if (!chatRequestsRef.current.isCurrentContext(requestContext)) {
+          return;
+        }
+
         if (isWalletSignatureRequiredError(err)) {
           try {
             clearWalletAuth();
-            const { retryMode } = await retryWithWallet(true);
+            const retry = await retryWithWallet(true);
+
+            if (!retry) {
+              return;
+            }
+
             toast.success("Wallet signature refreshed", {
               description:
-                retryMode === "research"
+                retry.retryMode === "research"
                   ? "Retrying Research mode."
                     : `Retrying ${FIXED_CHAT_MODEL_LABEL}.`,
             });
             return;
           } catch (retryErr) {
+            if (!chatRequestsRef.current.isCurrentContext(requestContext)) {
+              return;
+            }
+
             showError(
               setError,
               readFriendlyError(retryErr, "Unable to retry chat."),
@@ -603,13 +822,13 @@ const Chat = ({ sessionId }: ChatProps) => {
     },
     [
       clearWalletAuth,
-      isConnected,
       openWalletModal,
-      messages,
+      messagesForWallet,
       regenerate,
       requireTelegramLinkedWallet,
       sessionId,
       toolMode,
+      walletContext,
     ],
   );
 
@@ -623,7 +842,7 @@ const Chat = ({ sessionId }: ChatProps) => {
       <div className="flex min-h-0 flex-1 flex-col bg-muted/20">
         <Conversation className="min-h-0">
           <ConversationContent className="pb-4">
-            {loading ? (
+            {loadingForWallet ? (
               <LoadingMessages />
             ) : visibleMessages.length === 0 ? (
               <ConversationEmptyState>
@@ -741,9 +960,9 @@ const Chat = ({ sessionId }: ChatProps) => {
           <ConversationScrollButton />
         </Conversation>
 
-        {(error || saveError || chatError) && (
+        {(errorForWallet || saveErrorForWallet) && (
           <div className="mx-3 mt-3 shrink-0 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-            {error || saveError || chatError?.message}
+            {errorForWallet || saveErrorForWallet}
           </div>
         )}
 

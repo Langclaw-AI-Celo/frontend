@@ -211,7 +211,10 @@ export function MemoryDataTable({
                     ?.setFilterValue(value === "all" ? undefined : value)
                 }
               >
-                <SelectTrigger className="w-[138px]">
+                <SelectTrigger
+                  aria-label="Filter memory status"
+                  className="w-[138px]"
+                >
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -232,7 +235,10 @@ export function MemoryDataTable({
                     ?.setFilterValue(value === "all" ? undefined : value)
                 }
               >
-                <SelectTrigger className="w-[152px]">
+                <SelectTrigger
+                  aria-label="Filter memory category"
+                  className="w-[152px]"
+                >
                   <SelectValue placeholder="Category" />
                 </SelectTrigger>
                 <SelectContent>
@@ -353,7 +359,7 @@ export function MemoryDataTable({
               value={`${table.getState().pagination.pageSize}`}
               onValueChange={(value) => table.setPageSize(Number(value))}
             >
-              <SelectTrigger className="w-[118px]">
+              <SelectTrigger aria-label="Rows per page" className="w-[118px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

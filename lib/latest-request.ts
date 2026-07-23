@@ -285,6 +285,10 @@ export function createChatSessionsRequestCoordinator(initialContext: string) {
   return createMemoryRequestCoordinator(initialContext);
 }
 
+export function createChatStartRequestCoordinator(initialContext: string) {
+  return createMemoryRequestCoordinator(initialContext);
+}
+
 export function createProofsRequestCoordinator(initialContext: string) {
   const loadGuard = createLatestRequestGuard();
   let currentContext = initialContext;

@@ -315,6 +315,16 @@ export function createProofsRequestCoordinator(initialContext: string) {
   };
 }
 
+export function createStrategyRequestCoordinator(initialContext: string) {
+  const requests = createProofsRequestCoordinator(initialContext);
+
+  return {
+    invalidateAll: requests.invalidateAll,
+    runAction: requests.runLoad,
+    setContext: requests.setContext,
+  };
+}
+
 export function createSettingsRequestCoordinator(initialContext: string) {
   const loadGuard = createLatestRequestGuard();
   const mutationGuard = createContextRequestGuard();

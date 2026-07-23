@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertCircleIcon,
   BookmarkIcon,
@@ -35,41 +42,113 @@ import {
   listAlphaWatchlist,
   readFriendlyError,
 } from "@/lib/langclaw-api";
+import { createWatchlistRequestCoordinator } from "@/lib/latest-request";
+
+const EMPTY_WATCHLIST: AlphaWatchlistItem[] = [];
 
 export default function WatchlistPage() {
-  const { getWalletAuth, isConnected, isSigning } = useWalletSession();
-  const [items, setItems] = useState<AlphaWatchlistItem[]>([]);
-  const [error, setError] = useState("");
-  const [loaded, setLoaded] = useState(false);
-  const [loading, setLoading] = useState("");
+  const { address, getWalletAuth, isConnected, isSigning } = useWalletSession();
+  const [itemsState, setItems] = useState<AlphaWatchlistItem[]>([]);
+  const [errorState, setError] = useState("");
+  const [loadedState, setLoaded] = useState(false);
+  const [loadingState, setLoading] = useState("");
+  const [watchlistContext, setWatchlistContext] = useState("");
+  const walletContext =
+    isConnected && address ? address.trim().toLowerCase() : "";
+  const watchlistRequestsRef = useRef(
+    createWatchlistRequestCoordinator(walletContext),
+  );
+  const watchlistContextRef = useRef("");
+  const accountStateIsCurrent =
+    Boolean(walletContext) && watchlistContext === walletContext;
+  const items = accountStateIsCurrent ? itemsState : EMPTY_WATCHLIST;
+  const error = accountStateIsCurrent ? errorState : "";
+  const loaded = accountStateIsCurrent ? loadedState : false;
+  const loading = accountStateIsCurrent ? loadingState : "";
+
+  const getWalletForContext = useCallback(
+    async (requestContext: string) => {
+      const wallet = await getWalletAuth();
+
+      if (
+        !watchlistRequestsRef.current.isCurrentContext(requestContext) ||
+        wallet.address.trim().toLowerCase() !== requestContext
+      ) {
+        return null;
+      }
+
+      return wallet;
+    },
+    [getWalletAuth],
+  );
 
   const refreshItems = useCallback(async () => {
-    if (!isConnected) {
-      setItems([]);
-      setLoaded(true);
-      setError("");
+    const requestContext = walletContext;
+
+    if (
+      !requestContext ||
+      !watchlistRequestsRef.current.isCurrentContext(requestContext)
+    ) {
       return;
     }
 
     setLoading("list");
     setError("");
 
-    try {
-      const wallet = await getWalletAuth();
-      setItems(await listAlphaWatchlist(wallet));
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to load alpha watchlist.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoaded(true);
-      setLoading("");
-    }
-  }, [getWalletAuth, isConnected]);
+    await watchlistRequestsRef.current.runLoad(
+      requestContext,
+      async () => {
+        const wallet = await getWalletForContext(requestContext);
+
+        if (!wallet) {
+          return null;
+        }
+
+        return listAlphaWatchlist(wallet);
+      },
+      {
+        onError: (err) => {
+          const message = readFriendlyError(
+            err,
+            "Unable to load alpha watchlist.",
+          );
+          setError(message);
+          toast.error(message);
+        },
+        onSettled: () => {
+          setLoaded(true);
+          setLoading((current) => (current === "list" ? "" : current));
+        },
+        onSuccess: (nextItems) => {
+          if (!nextItems) {
+            return;
+          }
+
+          watchlistContextRef.current = requestContext;
+          setWatchlistContext(requestContext);
+          setItems(nextItems);
+        },
+      },
+    );
+  }, [getWalletForContext, walletContext]);
+
+  useLayoutEffect(() => {
+    watchlistRequestsRef.current.setContext(walletContext);
+    watchlistContextRef.current = "";
+  }, [walletContext]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      void refreshItems();
+      setItems([]);
+      setError("");
+      setLoaded(false);
+      setLoading("");
+      watchlistContextRef.current = walletContext;
+      setWatchlistContext(walletContext);
+
+      if (walletContext) {
+        void refreshItems();
+      }
     }, 0);
 
     const handleWatchlistUpdated = () => {
@@ -88,7 +167,15 @@ export default function WatchlistPage() {
         handleWatchlistUpdated,
       );
     };
-  }, [refreshItems]);
+  }, [refreshItems, walletContext]);
+
+  useEffect(() => {
+    const watchlistRequests = watchlistRequestsRef.current;
+
+    return () => {
+      watchlistRequests.invalidateAll();
+    };
+  }, []);
 
   const stats = useMemo(() => {
     const anchored = items.filter(
@@ -100,46 +187,93 @@ export default function WatchlistPage() {
     return { anchored, gapCount, sourceCount, total: items.length };
   }, [items]);
 
-  const handleRemove = useCallback(
-    async (item: AlphaWatchlistItem) => {
-      setLoading(item.id);
+  const runWatchlistMutation = useCallback(
+    async <T,>(
+      nextLoadingState: string,
+      fallbackError: string,
+      operation: (
+        wallet: NonNullable<Awaited<ReturnType<typeof getWalletForContext>>>,
+      ) => Promise<T>,
+      onSuccess: (value: T, requestContext: string) => void,
+    ) => {
+      const requestContext = walletContext;
+
+      if (
+        !requestContext ||
+        !watchlistRequestsRef.current.isCurrentContext(requestContext) ||
+        watchlistContextRef.current !== requestContext
+      ) {
+        return false;
+      }
+
+      setLoading(nextLoadingState);
       setError("");
 
-      try {
-        const wallet = await getWalletAuth();
-        await deleteAlphaWatchlistItem(wallet, item.id);
-        setItems((current) => current.filter((entry) => entry.id !== item.id));
-        toast.success("Removed from watchlist", {
-          description: item.title,
-        });
-      } catch (err) {
-        const message = readFriendlyError(err, "Unable to remove watchlist item.");
-        setError(message);
-        toast.error(message);
-      } finally {
-        setLoading("");
-      }
+      return watchlistRequestsRef.current.runMutation(
+        requestContext,
+        watchlistContextRef.current,
+        async () => {
+          const wallet = await getWalletForContext(requestContext);
+
+          if (!wallet) {
+            return null;
+          }
+
+          return { value: await operation(wallet) };
+        },
+        {
+          onError: (err) => {
+            const message = readFriendlyError(err, fallbackError);
+            setError(message);
+            toast.error(message);
+          },
+          onSettled: () =>
+            setLoading((current) =>
+              current === nextLoadingState ? "" : current,
+            ),
+          onSuccess: (result) => {
+            if (result) {
+              onSuccess(result.value, requestContext);
+            }
+          },
+        },
+      );
     },
-    [getWalletAuth],
+    [getWalletForContext, walletContext],
+  );
+
+  const handleRemove = useCallback(
+    async (item: AlphaWatchlistItem) => {
+      await runWatchlistMutation(
+        item.id,
+        "Unable to remove watchlist item.",
+        (wallet) => deleteAlphaWatchlistItem(wallet, item.id),
+        (_result, requestContext) => {
+          watchlistContextRef.current = requestContext;
+          setWatchlistContext(requestContext);
+          setItems((current) => current.filter((entry) => entry.id !== item.id));
+          toast.success("Removed from watchlist", {
+            description: item.title,
+          });
+        },
+      );
+    },
+    [runWatchlistMutation],
   );
 
   const handleClear = useCallback(async () => {
-    setLoading("clear");
-    setError("");
-
-    try {
-      const wallet = await getWalletAuth();
-      await clearAlphaWatchlist(wallet);
-      setItems([]);
-      toast.success("Watchlist cleared");
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to clear watchlist.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
-  }, [getWalletAuth]);
+    await runWatchlistMutation(
+      "clear",
+      "Unable to clear watchlist.",
+      clearAlphaWatchlist,
+      (_result, requestContext) => {
+        watchlistContextRef.current = requestContext;
+        setWatchlistContext(requestContext);
+        setItems([]);
+        toast.success("Watchlist cleared");
+      },
+    );
+  }, [runWatchlistMutation]);
 
   return (
     <div className="space-y-6">
@@ -153,7 +287,7 @@ export default function WatchlistPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
-            disabled={loading === "list" || isSigning}
+            disabled={!walletContext || loading === "list" || isSigning}
             onClick={() => void refreshItems()}
             size="sm"
             type="button"
@@ -163,7 +297,12 @@ export default function WatchlistPage() {
             Refresh
           </Button>
           <Button
-            disabled={!items.length || loading === "clear" || isSigning}
+            disabled={
+              !accountStateIsCurrent ||
+              !items.length ||
+              loading === "clear" ||
+              isSigning
+            }
             onClick={() => void handleClear()}
             size="sm"
             type="button"
@@ -226,7 +365,11 @@ export default function WatchlistPage() {
               <CardAction>
                 <Button
                   aria-label={`Remove ${item.title}`}
-                  disabled={loading === item.id || isSigning}
+                  disabled={
+                    !accountStateIsCurrent ||
+                    loading === item.id ||
+                    isSigning
+                  }
                   onClick={() => void handleRemove(item)}
                   size="icon-sm"
                   type="button"

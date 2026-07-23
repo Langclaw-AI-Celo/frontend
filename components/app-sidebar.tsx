@@ -1,7 +1,14 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 
 import {
@@ -88,6 +95,7 @@ import {
 import { useIsMiniPay } from "@/hooks/use-minipay";
 import { Badge } from "./ui/badge";
 import { LangclawLogo } from "./LangclawLogo";
+import { createChatSessionsRequestCoordinator } from "@/lib/latest-request";
 
 type SidebarNavItem = {
   href: string;
@@ -146,18 +154,40 @@ const systemNavItems: SidebarNavItem[] = [
   },
 ];
 
+const EMPTY_CHAT_SESSIONS: ChatSession[] = [];
+
 export function AppSidebar() {
   const { isConnected, address } = useConnection();
   const isMiniPay = useIsMiniPay();
   const pathname = usePathname();
   const { getWalletAuth } = useWalletSession();
   // const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
-  const [sessionsError, setSessionsError] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
-  const [renameTarget, setRenameTarget] = useState<ChatSession | null>(null);
+  const [sessionsState, setSessions] = useState<ChatSession[]>([]);
+  const [isLoadingSessionsState, setIsLoadingSessions] = useState(false);
+  const [sessionsErrorState, setSessionsError] = useState("");
+  const [deleteTargetState, setDeleteTargetState] =
+    useState<ChatSession | null>(null);
+  const [renameTargetState, setRenameTargetState] =
+    useState<ChatSession | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
+  const [sessionsContext, setSessionsContext] = useState("");
+  const walletContext =
+    isConnected && address ? address.trim().toLowerCase() : "";
+  const chatSessionRequestsRef = useRef(
+    createChatSessionsRequestCoordinator(walletContext),
+  );
+  const sessionsContextRef = useRef("");
+  const sessionStateIsCurrent =
+    Boolean(walletContext) && sessionsContext === walletContext;
+  const sessions = sessionStateIsCurrent
+    ? sessionsState
+    : EMPTY_CHAT_SESSIONS;
+  const isLoadingSessions = sessionStateIsCurrent
+    ? isLoadingSessionsState
+    : false;
+  const sessionsError = sessionStateIsCurrent ? sessionsErrorState : "";
+  const renameTarget = sessionStateIsCurrent ? renameTargetState : null;
+  const deleteTarget = sessionStateIsCurrent ? deleteTargetState : null;
   const activeChainId = useChainId();
   const chains = useChains();
   const activeChain = useMemo(
@@ -192,39 +222,91 @@ export function AppSidebar() {
     [sessions],
   );
 
+  const getWalletForContext = useCallback(
+    async (requestContext: string) => {
+      const wallet = await getWalletAuth();
+
+      if (
+        !chatSessionRequestsRef.current.isCurrentContext(requestContext) ||
+        wallet.address.trim().toLowerCase() !== requestContext
+      ) {
+        return null;
+      }
+
+      return wallet;
+    },
+    [getWalletAuth],
+  );
+
   const refreshSessions = useCallback(async () => {
-    if (!isConnected || !address) {
-      setSessions([]);
-      setSessionsError("");
-      setIsLoadingSessions(false);
+    const requestContext = walletContext;
+
+    if (
+      !requestContext ||
+      !chatSessionRequestsRef.current.isCurrentContext(requestContext)
+    ) {
       return;
     }
 
     setIsLoadingSessions(true);
 
-    try {
-      const wallet = await getWalletAuth();
-      const nextSessions = await listChatSessions(wallet);
-      setSessions(nextSessions);
-      setSessionsError("");
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to load chats.";
-      setSessions([]);
-      setSessionsError(message);
-      toast.error(message);
-    } finally {
-      setIsLoadingSessions(false);
-    }
-  }, [address, getWalletAuth, isConnected]);
+    await chatSessionRequestsRef.current.runLoad(
+      requestContext,
+      async () => {
+        const wallet = await getWalletForContext(requestContext);
+
+        if (!wallet) {
+          return null;
+        }
+
+        return listChatSessions(wallet);
+      },
+      {
+        onError: (error) => {
+          const message =
+            error instanceof Error ? error.message : "Unable to load chats.";
+          setSessions([]);
+          setSessionsError(message);
+          toast.error(message);
+        },
+        onSettled: () => setIsLoadingSessions(false),
+        onSuccess: (nextSessions) => {
+          if (!nextSessions) {
+            return;
+          }
+
+          sessionsContextRef.current = requestContext;
+          setSessionsContext(requestContext);
+          setSessions(nextSessions);
+          setSessionsError("");
+        },
+      },
+    );
+  }, [getWalletForContext, walletContext]);
+
+  useLayoutEffect(() => {
+    chatSessionRequestsRef.current.setContext(walletContext);
+    sessionsContextRef.current = "";
+  }, [walletContext]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      void refreshSessions();
+      setSessions([]);
+      setSessionsError("");
+      setIsLoadingSessions(false);
+      setDeleteTargetState(null);
+      setRenameTargetState(null);
+      setRenameTitle("");
+      sessionsContextRef.current = "";
+      setSessionsContext(walletContext);
+
+      if (walletContext) {
+        void refreshSessions();
+      }
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [refreshSessions]);
+  }, [refreshSessions, walletContext]);
 
   // useEffect(() => {
   //   const timeoutId = window.setTimeout(() => {
@@ -249,41 +331,104 @@ export function AppSidebar() {
     };
   }, [refreshSessions]);
 
-  const handleTogglePinned = useCallback(
-    async (session: ChatSession) => {
-      try {
-        const wallet = await getWalletAuth();
-        const updated = await updateChatSessionMetadata(wallet, {
-          pinned: !session.pinned,
-          sessionId: session.id,
-        });
-        setSessions((current) =>
-          current.map((item) =>
-            item.id === session.id
-              ? {
-                  ...item,
-                  ...(updated ?? {}),
-                  messages: item.messages,
-                  pinned: updated?.pinned ?? !session.pinned,
-                }
-              : item,
-          ),
-        );
-        dispatchChatSessionsUpdated();
-        toast.success(session.pinned ? "Chat unpinned" : "Chat pinned");
-      } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : "Unable to update chat.",
-        );
+  useEffect(() => {
+    const chatSessionRequests = chatSessionRequestsRef.current;
+
+    return () => {
+      chatSessionRequests.invalidateAll();
+    };
+  }, []);
+
+  const runChatSessionMutation = useCallback(
+    async <T,>(
+      operation: (
+        wallet: NonNullable<Awaited<ReturnType<typeof getWalletForContext>>>,
+      ) => Promise<T>,
+      onSuccess: (value: T, requestContext: string) => void,
+      fallbackError: string,
+    ) => {
+      const requestContext = walletContext;
+
+      if (
+        !requestContext ||
+        !chatSessionRequestsRef.current.isCurrentContext(requestContext) ||
+        sessionsContextRef.current !== requestContext
+      ) {
+        return false;
       }
+
+      return chatSessionRequestsRef.current.runMutation(
+        requestContext,
+        sessionsContextRef.current,
+        async () => {
+          const wallet = await getWalletForContext(requestContext);
+
+          if (!wallet) {
+            return null;
+          }
+
+          return { value: await operation(wallet) };
+        },
+        {
+          onError: (error) => {
+            toast.error(
+              error instanceof Error ? error.message : fallbackError,
+            );
+          },
+          onSuccess: (result) => {
+            if (result) {
+              onSuccess(result.value, requestContext);
+            }
+          },
+        },
+      );
     },
-    [getWalletAuth],
+    [getWalletForContext, walletContext],
   );
 
-  const openRenameDialog = useCallback((session: ChatSession) => {
-    setRenameTarget(session);
-    setRenameTitle(session.title);
-  }, []);
+  const handleTogglePinned = useCallback(
+    async (session: ChatSession) => {
+      await runChatSessionMutation(
+        (wallet) =>
+          updateChatSessionMetadata(wallet, {
+            pinned: !session.pinned,
+            sessionId: session.id,
+          }),
+        (updated, requestContext) => {
+          sessionsContextRef.current = requestContext;
+          setSessionsContext(requestContext);
+          setSessions((current) =>
+            current.map((item) =>
+              item.id === session.id
+                ? {
+                    ...item,
+                    ...(updated ?? {}),
+                    messages: item.messages,
+                    pinned: updated?.pinned ?? !session.pinned,
+                  }
+                : item,
+            ),
+          );
+          dispatchChatSessionsUpdated();
+          toast.success(session.pinned ? "Chat unpinned" : "Chat pinned");
+        },
+        "Unable to update chat.",
+      );
+    },
+    [runChatSessionMutation],
+  );
+
+  const openRenameDialog = useCallback(
+    (session: ChatSession) => {
+      if (sessionsContextRef.current !== walletContext) {
+        return;
+      }
+
+      setRenameTargetState(session);
+      setRenameTitle(session.title);
+    },
+    [walletContext],
+  );
 
   const handleRenameSession = useCallback(async () => {
     if (!renameTarget) {
@@ -297,55 +442,56 @@ export function AppSidebar() {
       return;
     }
 
-    try {
-      const wallet = await getWalletAuth();
-      const updated = await updateChatSessionMetadata(wallet, {
-        sessionId: renameTarget.id,
-        title,
-      });
-      setSessions((current) =>
-        current.map((item) =>
-          item.id === renameTarget.id
-            ? {
-                ...item,
-                ...(updated ?? {}),
-                messages: item.messages,
-                title: updated?.title ?? title,
-              }
-            : item,
-        ),
-      );
-      setRenameTarget(null);
-      setRenameTitle("");
-      dispatchChatSessionsUpdated();
-      toast.success("Chat renamed");
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to rename chat.",
-      );
-    }
-  }, [getWalletAuth, renameTarget, renameTitle]);
+    await runChatSessionMutation(
+      (wallet) =>
+        updateChatSessionMetadata(wallet, {
+          sessionId: renameTarget.id,
+          title,
+        }),
+      (updated, requestContext) => {
+        sessionsContextRef.current = requestContext;
+        setSessionsContext(requestContext);
+        setSessions((current) =>
+          current.map((item) =>
+            item.id === renameTarget.id
+              ? {
+                  ...item,
+                  ...(updated ?? {}),
+                  messages: item.messages,
+                  title: updated?.title ?? title,
+                }
+              : item,
+          ),
+        );
+        setRenameTargetState(null);
+        setRenameTitle("");
+        dispatchChatSessionsUpdated();
+        toast.success("Chat renamed");
+      },
+      "Unable to rename chat.",
+    );
+  }, [renameTarget, renameTitle, runChatSessionMutation]);
 
   const handleConfirmDelete = useCallback(async () => {
     if (!deleteTarget) {
       return;
     }
 
-    try {
-      const wallet = await getWalletAuth();
-      await deleteChatSession(wallet, deleteTarget.id);
-      setSessions((current) =>
-        current.filter((session) => session.id !== deleteTarget.id),
-      );
-      setDeleteTarget(null);
-      dispatchChatSessionsUpdated();
-      toast.success("Chat deleted");
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to delete chat.",
-      );
-    }
-  }, [deleteTarget, getWalletAuth]);
+    await runChatSessionMutation(
+      (wallet) => deleteChatSession(wallet, deleteTarget.id),
+      (_result, requestContext) => {
+        sessionsContextRef.current = requestContext;
+        setSessionsContext(requestContext);
+        setSessions((current) =>
+          current.filter((session) => session.id !== deleteTarget.id),
+        );
+        setDeleteTargetState(null);
+        dispatchChatSessionsUpdated();
+        toast.success("Chat deleted");
+      },
+      "Unable to delete chat.",
+    );
+  }, [deleteTarget, runChatSessionMutation]);
 
   // if (isReconnecting) {
   //   <p>hai</p>;
@@ -418,7 +564,7 @@ export function AppSidebar() {
                       isConnected ? "No pinned chats" : "Connect wallet first"
                     }
                     isLoading={isLoadingSessions}
-                    onDeleteRequest={setDeleteTarget}
+                      onDeleteRequest={setDeleteTargetState}
                     onRenameRequest={openRenameDialog}
                     onTogglePinned={handleTogglePinned}
                     pathname={pathname}
@@ -449,7 +595,7 @@ export function AppSidebar() {
                       isConnected ? "No recent chats" : "Connect wallet first"
                     }
                     isLoading={isLoadingSessions}
-                    onDeleteRequest={setDeleteTarget}
+                      onDeleteRequest={setDeleteTargetState}
                     onRenameRequest={openRenameDialog}
                     onTogglePinned={handleTogglePinned}
                     pathname={pathname}
@@ -556,7 +702,7 @@ export function AppSidebar() {
       <Dialog
         onOpenChange={(open) => {
           if (!open) {
-            setRenameTarget(null);
+            setRenameTargetState(null);
             setRenameTitle("");
           }
         }}
@@ -596,7 +742,7 @@ export function AppSidebar() {
       <Dialog
         onOpenChange={(open) => {
           if (!open) {
-            setDeleteTarget(null);
+            setDeleteTargetState(null);
           }
         }}
         open={Boolean(deleteTarget)}

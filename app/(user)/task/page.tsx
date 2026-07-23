@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Activity,
   AlertCircle,
@@ -63,6 +70,7 @@ import {
   type AutomationTaskInput,
   type AutomationTriggerType,
 } from "@/lib/langclaw-api";
+import { createAutomationRequestCoordinator } from "@/lib/latest-request";
 
 type TaskForm = {
   eventName: string;
@@ -89,52 +97,183 @@ const defaultForm: TaskForm = {
 };
 
 export default function Page() {
-  const { getWalletAuth, isConnected, openWalletModal } = useWalletSession();
-  const [dashboard, setDashboard] = useState<AutomationDashboard | null>(null);
+  const { address, getWalletAuth, isConnected, openWalletModal } =
+    useWalletSession();
+  const [dashboardState, setDashboard] =
+    useState<AutomationDashboard | null>(null);
   const [form, setForm] = useState<TaskForm>(defaultForm);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState("");
+  const [errorState, setError] = useState("");
+  const [loadingState, setLoading] = useState("");
+  const [dashboardContext, setDashboardContext] = useState("");
+  const [dashboardLoadedContext, setDashboardLoadedContext] = useState("");
+  const walletContext =
+    isConnected && address ? address.trim().toLowerCase() : "";
+  const automationRequestsRef = useRef(
+    createAutomationRequestCoordinator(walletContext),
+  );
+  const dashboardContextRef = useRef("");
+  const accountStateIsCurrent =
+    Boolean(walletContext) && dashboardContext === walletContext;
+  const dashboardIsLoadedForWallet =
+    accountStateIsCurrent && dashboardLoadedContext === walletContext;
+  const dashboard = accountStateIsCurrent ? dashboardState : null;
+  const error = accountStateIsCurrent ? errorState : "";
+  const loading = accountStateIsCurrent ? loadingState : "";
+
+  const getWalletForContext = useCallback(
+    async (requestContext: string) => {
+      const wallet = await getWalletAuth();
+
+      if (
+        !automationRequestsRef.current.isCurrentContext(requestContext) ||
+        wallet.address.trim().toLowerCase() !== requestContext
+      ) {
+        return null;
+      }
+
+      return wallet;
+    },
+    [getWalletAuth],
+  );
 
   const loadDashboard = useCallback(async () => {
-    if (!isConnected) {
-      setDashboard(null);
-      setError("");
+    const requestContext = walletContext;
+
+    if (
+      !requestContext ||
+      !automationRequestsRef.current.isCurrentContext(requestContext)
+    ) {
       return;
     }
 
     setLoading("dashboard");
     setError("");
 
-    try {
-      const wallet = await getWalletAuth();
-      setDashboard(await getAutomationDashboard(wallet));
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to load automations.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
-  }, [getWalletAuth, isConnected]);
+    await automationRequestsRef.current.runLoad(
+      requestContext,
+      async () => {
+        const wallet = await getWalletForContext(requestContext);
+
+        if (!wallet) {
+          return null;
+        }
+
+        return getAutomationDashboard(wallet);
+      },
+      {
+        onError: (err) => {
+          const message = readFriendlyError(err, "Unable to load automations.");
+          setError(message);
+          toast.error(message);
+        },
+        onSettled: () =>
+          setLoading((current) =>
+            current === "dashboard" ? "" : current,
+          ),
+        onSuccess: (nextDashboard) => {
+          if (!nextDashboard) {
+            return;
+          }
+
+          dashboardContextRef.current = requestContext;
+          setDashboardContext(requestContext);
+          setDashboardLoadedContext(requestContext);
+          setDashboard(nextDashboard);
+        },
+      },
+    );
+  }, [getWalletForContext, walletContext]);
+
+  useLayoutEffect(() => {
+    automationRequestsRef.current.setContext(walletContext);
+    dashboardContextRef.current = "";
+  }, [walletContext]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      void loadDashboard();
+      setDashboard(null);
+      setError("");
+      setLoading("");
+      dashboardContextRef.current = "";
+      setDashboardContext(walletContext);
+      setDashboardLoadedContext("");
+
+      if (walletContext) {
+        void loadDashboard();
+      }
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [loadDashboard]);
+  }, [loadDashboard, walletContext]);
 
-  const requireWallet = async () => {
-    if (!isConnected) {
-      openWalletModal();
-      throw new Error("Choose a wallet to manage automations.");
-    }
+  useEffect(() => {
+    const automationRequests = automationRequestsRef.current;
 
-    return getWalletAuth();
-  };
+    return () => {
+      automationRequests.invalidateAll();
+    };
+  }, []);
+
+  const runAutomationMutation = useCallback(
+    async <T,>(
+      nextLoadingState: string,
+      fallbackError: string,
+      operation: (
+        wallet: NonNullable<Awaited<ReturnType<typeof getWalletForContext>>>,
+      ) => Promise<T>,
+      onSuccess: (value: T, requestContext: string) => void,
+    ) => {
+      const requestContext = walletContext;
+
+      if (!requestContext) {
+        openWalletModal();
+        return false;
+      }
+
+      if (
+        !automationRequestsRef.current.isCurrentContext(requestContext) ||
+        dashboardContextRef.current !== requestContext
+      ) {
+        return false;
+      }
+
+      setLoading(nextLoadingState);
+      setError("");
+
+      return automationRequestsRef.current.runMutation(
+        requestContext,
+        dashboardContextRef.current,
+        async () => {
+          const wallet = await getWalletForContext(requestContext);
+
+          if (!wallet) {
+            return null;
+          }
+
+          return { value: await operation(wallet) };
+        },
+        {
+          onError: (err) => {
+            const message = readFriendlyError(err, fallbackError);
+            setError(message);
+            toast.error(message);
+          },
+          onSettled: () =>
+            setLoading((current) =>
+              current === nextLoadingState ? "" : current,
+            ),
+          onSuccess: (result) => {
+            if (result) {
+              onSuccess(result.value, requestContext);
+            }
+          },
+        },
+      );
+    },
+    [getWalletForContext, openWalletModal, walletContext],
+  );
 
   const filteredTasks = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -158,109 +297,86 @@ export default function Page() {
       return;
     }
 
-    setLoading("create");
-    setError("");
+    const taskInput: AutomationTaskInput = {
+      name: form.name,
+      project: form.project,
+      prompt: form.prompt,
+      scheduleFrequency: form.scheduleFrequency,
+      scheduleTime: form.scheduleTime,
+      status: form.status,
+      timezone: form.timezone,
+      triggerType: form.triggerType,
+      eventName:
+        form.triggerType === "event" ? form.eventName || form.name : undefined,
+    };
 
-    try {
-      const wallet = await requireWallet();
-      const taskInput: AutomationTaskInput = {
-        name: form.name,
-        project: form.project,
-        prompt: form.prompt,
-        scheduleFrequency: form.scheduleFrequency,
-        scheduleTime: form.scheduleTime,
-        status: form.status,
-        timezone: form.timezone,
-        triggerType: form.triggerType,
-        eventName:
-          form.triggerType === "event" ? form.eventName || form.name : undefined,
-      };
-      await createAutomationTask(wallet, taskInput);
-      setForm(defaultForm);
-      toast.success("Automation created");
-      await loadDashboard();
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to create automation.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await runAutomationMutation(
+      "create",
+      "Unable to create automation.",
+      (wallet) => createAutomationTask(wallet, taskInput),
+      () => {
+        setForm(defaultForm);
+        toast.success("Automation created");
+        void loadDashboard();
+      },
+    );
   };
 
   const handleStatus = async (
     task: AutomationTask,
     status: "active" | "paused",
   ) => {
-    setLoading(`${status}-${task.id}`);
-    setError("");
-
-    try {
-      const wallet = await requireWallet();
-      await setAutomationTaskStatus(wallet, task.id, status);
-      toast.success(status === "active" ? "Automation resumed" : "Automation paused");
-      await loadDashboard();
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to update automation.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await runAutomationMutation(
+      `${status}-${task.id}`,
+      "Unable to update automation.",
+      (wallet) => setAutomationTaskStatus(wallet, task.id, status),
+      () => {
+        toast.success(
+          status === "active" ? "Automation resumed" : "Automation paused",
+        );
+        void loadDashboard();
+      },
+    );
   };
 
   const handleRun = async (task: AutomationTask) => {
-    setLoading(`run-${task.id}`);
-    setError("");
-
-    try {
-      const wallet = await requireWallet();
-      await runAutomationTask(wallet, task.id);
-      toast.success("Automation run started");
-      await loadDashboard();
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to run automation.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await runAutomationMutation(
+      `run-${task.id}`,
+      "Unable to run automation.",
+      (wallet) => runAutomationTask(wallet, task.id),
+      () => {
+        toast.success("Automation run started");
+        void loadDashboard();
+      },
+    );
   };
 
   const handleDelete = async (task: AutomationTask) => {
-    setLoading(`delete-${task.id}`);
-    setError("");
-
-    try {
-      const wallet = await requireWallet();
-      await deleteAutomationTask(wallet, task.id);
-      toast.success("Automation deleted");
-      await loadDashboard();
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to delete automation.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await runAutomationMutation(
+      `delete-${task.id}`,
+      "Unable to delete automation.",
+      (wallet) => deleteAutomationTask(wallet, task.id),
+      () => {
+        toast.success("Automation deleted");
+        void loadDashboard();
+      },
+    );
   };
 
   const handleAllStatus = async (status: "active" | "paused") => {
-    setLoading(`${status}-all`);
-    setError("");
-
-    try {
-      const wallet = await requireWallet();
-      await setAllAutomationTasksStatus(wallet, status);
-      toast.success(status === "active" ? "All automations resumed" : "All automations paused");
-      await loadDashboard();
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to update automations.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await runAutomationMutation(
+      `${status}-all`,
+      "Unable to update automations.",
+      (wallet) => setAllAutomationTasksStatus(wallet, status),
+      () => {
+        toast.success(
+          status === "active"
+            ? "All automations resumed"
+            : "All automations paused",
+        );
+        void loadDashboard();
+      },
+    );
   };
 
   const stats = dashboard?.stats;
@@ -289,7 +405,13 @@ export default function Page() {
             )}
             Refresh
           </Button>
-          <Button disabled={loading === "create"} onClick={() => void handleCreate()}>
+          <Button
+            disabled={
+              (Boolean(walletContext) && !dashboardIsLoadedForWallet) ||
+              loading === "create"
+            }
+            onClick={() => void handleCreate()}
+          >
             {loading === "create" ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
@@ -648,7 +770,10 @@ export default function Page() {
           </div>
           <CardAction className="flex gap-2">
             <Button
-              disabled={loading === "paused-all"}
+              disabled={
+                (Boolean(walletContext) && !dashboardIsLoadedForWallet) ||
+                loading === "paused-all"
+              }
               onClick={() => void handleAllStatus("paused")}
               size="sm"
               variant="outline"
@@ -661,7 +786,10 @@ export default function Page() {
               Pause all
             </Button>
             <Button
-              disabled={loading === "active-all"}
+              disabled={
+                (Boolean(walletContext) && !dashboardIsLoadedForWallet) ||
+                loading === "active-all"
+              }
               onClick={() => void handleAllStatus("active")}
               size="sm"
             >

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircleIcon,
   ArrowUpRightIcon,
@@ -74,6 +74,7 @@ import {
   resolveProductChain,
 } from "@/lib/chains";
 import { safeExternalUrl } from "@/lib/external-url";
+import { createStrategyRequestCoordinator } from "@/lib/latest-request";
 
 const samplePairs = [
   {
@@ -109,7 +110,18 @@ export default function StrategyPage() {
   >("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState<"backtest" | "paper" | "scan" | "">("");
+  const strategyRequestsRef = useRef(
+    createStrategyRequestCoordinator(defaultProductChain),
+  );
   const chainConfig = resolveProductChain(selectedChain);
+
+  useEffect(() => {
+    const strategyRequests = strategyRequestsRef.current;
+
+    return () => {
+      strategyRequests.invalidateAll();
+    };
+  }, []);
 
   const pairAddress = useMemo(() => {
     const custom = customPair.trim();
@@ -203,59 +215,79 @@ export default function StrategyPage() {
         : "Open Proof Center";
 
   const handleRunBacktest = async () => {
+    const requestChain = selectedChain;
+
     setLoading("backtest");
     setError("");
     setPaperTrade(null);
 
-    try {
-      const nextBacktest = await runStrategyBacktest({
-        chain: selectedChain,
-        pairAddress,
-        queryId: queryId.trim() || undefined,
-      });
-      setBacktest(nextBacktest);
-      setBacktestSource("anchored");
-      toast.success("Backtest completed", {
-        description: nextBacktest.title,
-      });
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to run strategy backtest.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await strategyRequestsRef.current.runAction(
+      requestChain,
+      () =>
+        runStrategyBacktest({
+          chain: requestChain,
+          pairAddress,
+          queryId: queryId.trim() || undefined,
+        }),
+      {
+        onError: (err) => {
+          const message = readFriendlyError(
+            err,
+            "Unable to run strategy backtest.",
+          );
+          setError(message);
+          toast.error(message);
+        },
+        onSettled: () => setLoading(""),
+        onSuccess: (nextBacktest) => {
+          setBacktest(nextBacktest);
+          setBacktestSource("anchored");
+          toast.success("Backtest completed", {
+            description: nextBacktest.title,
+          });
+        },
+      },
+    );
   };
 
   const handleScanPairs = async () => {
+    const requestChain = selectedChain;
+    const requestChainName = chainConfig.name;
+
     setLoading("scan");
     setError("");
     setPaperTrade(null);
 
-    try {
-      const nextScan = await scanStrategyPairs({
-        chain: selectedChain,
-        limit: 12,
-        queryId: queryId.trim() || undefined,
-      });
-      setPairScan(nextScan);
-      setBacktest(nextScan.bestBacktest);
-      setBacktestSource("scan");
-      setCustomPair(nextScan.selectedPairAddress);
-      setSelectedPair("default");
-      toast.success("Best pair selected", {
-        description: `${shortHash(nextScan.selectedPairAddress)} scored ${nextScan.candidates[0]?.score ?? 0}. Click Run Backtest to anchor proof.`,
-      });
-    } catch (err) {
-      const message = readFriendlyError(
-        err,
-        `Unable to scan ${chainConfig.name} pairs.`,
-      );
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await strategyRequestsRef.current.runAction(
+      requestChain,
+      () =>
+        scanStrategyPairs({
+          chain: requestChain,
+          limit: 12,
+          queryId: queryId.trim() || undefined,
+        }),
+      {
+        onError: (err) => {
+          const message = readFriendlyError(
+            err,
+            `Unable to scan ${requestChainName} pairs.`,
+          );
+          setError(message);
+          toast.error(message);
+        },
+        onSettled: () => setLoading(""),
+        onSuccess: (nextScan) => {
+          setPairScan(nextScan);
+          setBacktest(nextScan.bestBacktest);
+          setBacktestSource("scan");
+          setCustomPair(nextScan.selectedPairAddress);
+          setSelectedPair("default");
+          toast.success("Best pair selected", {
+            description: `${shortHash(nextScan.selectedPairAddress)} scored ${nextScan.candidates[0]?.score ?? 0}. Click Run Backtest to anchor proof.`,
+          });
+        },
+      },
+    );
   };
 
   const handleUseCandidate = (candidate: StrategyScanCandidate) => {
@@ -284,41 +316,56 @@ export default function StrategyPage() {
       return;
     }
 
+    const requestBacktest = backtest;
+    const requestChain = selectedChain;
+    const requestChainName = chainConfig.name;
+
     setLoading("paper");
     setError("");
 
-    try {
-      const nextPaperTrade = await openStrategyPaperTrade({
-        backtest,
-        chain: selectedChain,
-        notionalUsd: 1_000,
-      });
-      const decisionCopy = getPaperDecisionCopy(
-        nextPaperTrade.action,
-        chainConfig.name,
-      );
-      setPaperTrade(nextPaperTrade);
-      toast.success(decisionCopy.toastTitle, {
-        description: decisionCopy.toastDescription(nextPaperTrade.market),
-      });
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to record paper decision.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await strategyRequestsRef.current.runAction(
+      requestChain,
+      () =>
+        openStrategyPaperTrade({
+          backtest: requestBacktest,
+          chain: requestChain,
+          notionalUsd: 1_000,
+        }),
+      {
+        onError: (err) => {
+          const message = readFriendlyError(
+            err,
+            "Unable to record paper decision.",
+          );
+          setError(message);
+          toast.error(message);
+        },
+        onSettled: () => setLoading(""),
+        onSuccess: (nextPaperTrade) => {
+          const decisionCopy = getPaperDecisionCopy(
+            nextPaperTrade.action,
+            requestChainName,
+          );
+          setPaperTrade(nextPaperTrade);
+          toast.success(decisionCopy.toastTitle, {
+            description: decisionCopy.toastDescription(nextPaperTrade.market),
+          });
+        },
+      },
+    );
   };
 
   const handleChainChange = (value: string) => {
     const nextChain = value === "celo" ? "celo" : "mantle";
 
+    strategyRequestsRef.current.setContext(nextChain);
     setSelectedChain(nextChain);
     setPairScan(null);
     setBacktest(null);
     setPaperTrade(null);
     setBacktestSource("");
     setError("");
+    setLoading("");
   };
 
   return (

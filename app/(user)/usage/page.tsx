@@ -83,6 +83,12 @@ import {
   validateWithdrawalTransaction,
 } from "@/lib/credits-validation";
 import { createDepositClaim } from "@/lib/deposit-claim";
+import {
+  createUsageRequestCoordinator,
+  shouldDisableBalanceRefresh,
+  shouldDisableChainSelection,
+  shouldResetMiniPayChain,
+} from "@/lib/latest-request";
 import { isMiniPayProvider } from "@/lib/minipay";
 import { cn } from "@/lib/utils";
 
@@ -172,9 +178,30 @@ export default function UsagePage() {
   const [reference, setReference] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState("");
+  const [isBalanceLoading, setIsBalanceLoading] = useState(false);
   const [copied, setCopied] = useState("");
   const autoCreditHashRef = useRef("");
+  const usageRequestsRef = useRef(
+    createUsageRequestCoordinator(defaultProductChain),
+  );
   const verifiedAttributionHashesRef = useRef(new Set<string>());
+  const resetUsageChainState = useCallback((nextChain: ProductChainId) => {
+    usageRequestsRef.current.setContext(nextChain);
+    setSelectedChain(nextChain);
+    setQuote(null);
+    setBalance(null);
+    setVaultInfo(null);
+    setDeposit(null);
+    setWithdraw(null);
+    setDepositHash(undefined);
+    setWithdrawHash(undefined);
+    setTxHash("");
+    setReference("");
+    setError("");
+    setLoading("");
+    setIsBalanceLoading(false);
+    autoCreditHashRef.current = "";
+  }, []);
   const {
     data: depositReceipt,
     isLoading: isConfirmingDeposit,
@@ -341,6 +368,13 @@ export default function UsagePage() {
     !isWithdrawPending &&
     !isConfirmingWithdraw &&
     loading !== "onchain-withdraw";
+  const isChainSelectionDisabled = shouldDisableChainSelection({
+    isConfirmingTransaction: isConfirmingDeposit || isConfirmingWithdraw,
+    isPendingTransaction:
+      isApprovePending || isDepositPending || isWithdrawPending,
+    isSigning,
+    operationLoading: loading,
+  });
 
   const regenerateDepositClaim = useCallback(() => {
     const claim = createDepositClaim();
@@ -359,27 +393,30 @@ export default function UsagePage() {
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      if (isMiniPay) {
-        setSelectedChain("celo");
+      if (shouldResetMiniPayChain(isMiniPay, selectedChain)) {
+        resetUsageChainState("celo");
       }
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [isMiniPay]);
+  }, [isMiniPay, resetUsageChainState, selectedChain]);
 
-  const getUsageWalletAuth = useCallback(async () => {
+  const getUsageWalletAuth = useCallback(async (chain = selectedChain) => {
     if (isMiniPayProvider() && address) {
-      return readCachedWalletAuth(address, selectedChain) ?? { address };
+      return readCachedWalletAuth(address, chain) ?? { address };
     }
 
-    return getWalletAuth({ chain: selectedChain });
+    return getWalletAuth({ chain });
   }, [address, getWalletAuth, selectedChain]);
 
   const verifyConfirmedAttribution = useCallback(
     async (hash: Hash) => {
+      const requestChain = selectedChain;
+
       if (
         !publicClient ||
-        selectedChain !== "celo" ||
+        requestChain !== "celo" ||
+        !usageRequestsRef.current.isCurrentContext(requestChain) ||
         verifiedAttributionHashesRef.current.has(hash)
       ) {
         return;
@@ -387,11 +424,15 @@ export default function UsagePage() {
 
       verifiedAttributionHashesRef.current.add(hash);
       const result = await verifyCeloAttributionTransaction({
-        chain: selectedChain,
+        chain: requestChain,
         getTransaction: (transactionHash) =>
           publicClient.getTransaction({ hash: transactionHash }),
         hash,
       });
+
+      if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+        return;
+      }
 
       if (result.status === "verified" || result.status === "skipped") {
         return;
@@ -409,52 +450,76 @@ export default function UsagePage() {
     [publicClient, selectedChain],
   );
 
-  const loadQuote = useCallback(async () => {
-    try {
-      const payload = await getUsageQuote(selectedChain);
-      setQuote(payload);
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to load quote.");
-      setError(message);
-      toast.error(message);
-    }
+  const loadQuote = useCallback(async (requestChain = selectedChain) => {
+    await usageRequestsRef.current.runQuote(
+      requestChain,
+      () => getUsageQuote(requestChain),
+      {
+        onError(err) {
+          const message = readFriendlyError(err, "Unable to load quote.");
+          setError(message);
+          toast.error(message);
+        },
+        onSuccess(payload) {
+          setQuote(payload);
+        },
+      },
+    );
   }, [selectedChain]);
 
-  const refreshBalance = useCallback(async () => {
-    if (!isConnected) {
-      setBalance(null);
+  const refreshBalance = useCallback(async (requestChain = selectedChain) => {
+    if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
       return;
     }
 
-    setLoading("balance");
+    if (!isConnected) {
+      usageRequestsRef.current.invalidateBalance();
+      setBalance(null);
+      setVaultInfo(null);
+      setIsBalanceLoading(false);
+      return;
+    }
+
+    setIsBalanceLoading(true);
     setError("");
 
-    try {
-      if (
-        isMiniPayProvider() &&
-        address &&
-        !readCachedWalletAuth(address, selectedChain)
-      ) {
-        const vault = await getUsageVaultInfo(selectedChain);
-        setBalance(null);
-        setVaultInfo(vault);
-        return;
-      }
+    await usageRequestsRef.current.runBalance(
+      requestChain,
+      async () => {
+        if (
+          isMiniPayProvider() &&
+          address &&
+          !readCachedWalletAuth(address, requestChain)
+        ) {
+          return {
+            balance: null,
+            vault: await getUsageVaultInfo(requestChain),
+          };
+        }
 
-      const wallet = await getUsageWalletAuth();
-      const [payload, vault] = await Promise.all([
-        getUsageBalance(wallet, selectedChain),
-        requestUsageWithdraw(wallet, selectedChain).catch(() => null),
-      ]);
-      setBalance(payload);
-      setVaultInfo(vault);
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to load balance.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+        const wallet = await getUsageWalletAuth(requestChain);
+        const [balance, vault] = await Promise.all([
+          getUsageBalance(wallet, requestChain),
+          requestUsageWithdraw(wallet, requestChain).catch(() => null),
+        ]);
+
+        return { balance, vault };
+      },
+      {
+        onError(err) {
+          const message = readFriendlyError(err, "Unable to load balance.");
+          setError(message);
+          toast.error(message);
+        },
+        onSettled() {
+          setIsBalanceLoading(false);
+        },
+        onSuccess(result) {
+          setBalance(result.balance);
+          setVaultInfo(result.vault);
+        },
+      },
+    );
   }, [address, getUsageWalletAuth, isConnected, selectedChain]);
 
   useEffect(() => {
@@ -506,6 +571,12 @@ export default function UsagePage() {
   ]);
 
   const handleRefreshVaultState = async () => {
+    const requestChain = selectedChain;
+
+    if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+      return;
+    }
+
     if (!vaultAddress) {
       showError(setError, "Load vault address first.");
       return;
@@ -514,20 +585,30 @@ export default function UsagePage() {
     setLoading("vault-state");
     setError("");
 
-    try {
-      await Promise.all([
+    await usageRequestsRef.current.runVaultState(
+      requestChain,
+      () => Promise.all([
         refetchAuthorizedWithdrawal(),
         refetchVaultPaused(),
         refetchWithdrawalAuthority(),
-      ]);
-      toast.success("Vault state refreshed");
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to refresh vault state.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+      ]),
+      {
+        onError(err) {
+          const message = readFriendlyError(
+            err,
+            "Unable to refresh vault state.",
+          );
+          setError(message);
+          toast.error(message);
+        },
+        onSettled() {
+          setLoading("");
+        },
+        onSuccess() {
+          toast.success("Vault state refreshed");
+        },
+      },
+    );
   };
 
   const handleVerifyDeposit = useCallback(
@@ -539,6 +620,12 @@ export default function UsagePage() {
         silent?: boolean;
       } = {},
     ) => {
+      const requestChain = selectedChain;
+
+      if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+        return;
+      }
+
       const hash = options.hash ?? (txHash.trim() || depositHash);
 
       if (!hash) {
@@ -549,36 +636,56 @@ export default function UsagePage() {
       setLoading("deposit");
       setError("");
       setDeposit(null);
+      let didVerify = false;
 
-      try {
-        const wallet = await getUsageWalletAuth();
-        const payload = await verifyUsageDeposit({
-          chain: selectedChain,
-          claimSecret:
-            options.claimSecret ?? (claimSecret.trim() || undefined),
-          reference: options.reference ?? (reference.trim() || undefined),
-          txHash: hash,
-          wallet,
-        });
-        if (payload.walletSession?.sessionToken) {
-          cacheWalletAuth(payload.walletSession, selectedChain);
-        }
-        setDeposit(payload);
-        toast.success(
-          options.silent ? "Deposit credited automatically" : "Deposit credited",
-          {
-            description: `${payload.amountNative ?? payload.amount0G} ${
-              payload.nativeSymbol ?? billingSymbol
-            } is ready to use.`,
+      await usageRequestsRef.current.runDeposit(
+        requestChain,
+        async () => {
+          const wallet = await getUsageWalletAuth(requestChain);
+
+          return verifyUsageDeposit({
+            chain: requestChain,
+            claimSecret:
+              options.claimSecret ?? (claimSecret.trim() || undefined),
+            reference: options.reference ?? (reference.trim() || undefined),
+            txHash: hash,
+            wallet,
+          });
+        },
+        {
+          onError(err) {
+            const message = readFriendlyError(
+              err,
+              "Unable to verify deposit.",
+            );
+            setError(message);
+            toast.error(message);
           },
-        );
-        await refreshBalance();
-      } catch (err) {
-        const message = readFriendlyError(err, "Unable to verify deposit.");
-        setError(message);
-        toast.error(message);
-      } finally {
-        setLoading("");
+          onSettled() {
+            setLoading("");
+          },
+          onSuccess(payload) {
+            didVerify = true;
+            if (payload.walletSession?.sessionToken) {
+              cacheWalletAuth(payload.walletSession, requestChain);
+            }
+            setDeposit(payload);
+            toast.success(
+              options.silent
+                ? "Deposit credited automatically"
+                : "Deposit credited",
+              {
+                description: `${payload.amountNative ?? payload.amount0G} ${
+                  payload.nativeSymbol ?? billingSymbol
+                } is ready to use.`,
+              },
+            );
+          },
+        },
+      );
+
+      if (didVerify) {
+        await refreshBalance(requestChain);
       }
     },
     [
@@ -624,6 +731,12 @@ export default function UsagePage() {
   ]);
 
   const handleSendDeposit = async () => {
+    const requestChain = selectedChain;
+
+    if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+      return;
+    }
+
     const depositVaultAddress = vaultInfo?.vaultAddress;
 
     if (!depositClaimSecret) {
@@ -654,6 +767,10 @@ export default function UsagePage() {
 
     try {
       await switchChainAsync?.({ chainId: chainConfig.chainId });
+      if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+        return;
+      }
+
       const celoFeeRequest = feeCurrencyAddress
         ? { feeCurrency: feeCurrencyAddress }
         : {};
@@ -670,7 +787,7 @@ export default function UsagePage() {
             return;
           }
 
-          const approvalRequest = withCeloAttribution(selectedChain, {
+          const approvalRequest = withCeloAttribution(requestChain, {
             abi: erc20Abi,
             address: billingTokenAddress,
             args: [validatedVaultAddress as Address, depositAmount],
@@ -682,19 +799,30 @@ export default function UsagePage() {
             approvalRequest as unknown as Parameters<typeof writeApproveAsync>[0],
           );
 
+          if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+            return;
+          }
+
           toast.success(`${billingSymbol} approval sent`, {
             description: `${shortHash(approvalHash)} is waiting for confirmation.`,
           });
 
           await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+          if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+            return;
+          }
+
           await refetchDepositAllowance();
+          if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+            return;
+          }
         }
       }
 
       let hash: Hash;
 
       if (isTokenBilling) {
-        const tokenDepositRequest = withCeloAttribution(selectedChain, {
+        const tokenDepositRequest = withCeloAttribution(requestChain, {
           abi: usageVaultAbi,
           address: validatedVaultAddress as `0x${string}`,
           args: [depositReference as `0x${string}`, depositAmount],
@@ -708,7 +836,7 @@ export default function UsagePage() {
           >[0],
         );
       } else {
-        const nativeDepositRequest = withCeloAttribution(selectedChain, {
+        const nativeDepositRequest = withCeloAttribution(requestChain, {
           abi: usageVaultAbi,
           address: validatedVaultAddress as `0x${string}`,
           args: [depositReference as `0x${string}`],
@@ -724,6 +852,10 @@ export default function UsagePage() {
         );
       }
 
+      if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+        return;
+      }
+
       setDepositHash(hash);
       setTxHash(hash);
       setClaimSecret(depositClaimSecret);
@@ -733,43 +865,70 @@ export default function UsagePage() {
         description: `${shortHash(hash)} is waiting for confirmation.`,
       });
     } catch (err) {
+      if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+        return;
+      }
+
       const message = readFriendlyError(err, "Unable to send deposit.");
       setError(message);
       toast.error(message);
     } finally {
-      setLoading("");
+      if (usageRequestsRef.current.isCurrentContext(requestChain)) {
+        setLoading("");
+      }
     }
   };
 
   const handleLoadVault = async () => {
+    const requestChain = selectedChain;
+
+    if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+      return;
+    }
+
     setLoading("vault");
     setError("");
 
-    try {
-      const cachedWallet = address
-        ? readCachedWalletAuth(address, selectedChain)
-        : null;
-      const payload =
-        isMiniPayProvider() && !cachedWallet
-          ? await getUsageVaultInfo(selectedChain)
-          : await requestUsageWithdraw(
-              cachedWallet ?? (await getWalletAuth({ chain: selectedChain })),
-              selectedChain,
+    await usageRequestsRef.current.runVault(
+      requestChain,
+      async () => {
+        const cachedWallet = address
+          ? readCachedWalletAuth(address, requestChain)
+          : null;
+
+        return isMiniPayProvider() && !cachedWallet
+          ? getUsageVaultInfo(requestChain)
+          : requestUsageWithdraw(
+              cachedWallet ?? (await getWalletAuth({ chain: requestChain })),
+              requestChain,
             );
-      setVaultInfo(payload);
-      toast.success("Usage vault loaded", {
-        description: shortHash(payload.vaultAddress),
-      });
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to load vault.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+      },
+      {
+        onError(err) {
+          const message = readFriendlyError(err, "Unable to load vault.");
+          setError(message);
+          toast.error(message);
+        },
+        onSettled() {
+          setLoading("");
+        },
+        onSuccess(payload) {
+          setVaultInfo(payload);
+          toast.success("Usage vault loaded", {
+            description: shortHash(payload.vaultAddress),
+          });
+        },
+      },
+    );
   };
 
   const handleWithdrawRequest = async () => {
+    const requestChain = selectedChain;
+
+    if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+      return;
+    }
+
     if (!parsedWithdrawAmount) {
       showError(setError, "Enter a valid withdrawal amount greater than zero.");
       return;
@@ -779,24 +938,39 @@ export default function UsagePage() {
     setError("");
     setWithdraw(null);
 
-    try {
-      const wallet = await getUsageWalletAuth();
-      const payload = await requestUsageWithdraw(wallet, selectedChain);
-      setWithdraw(payload);
-      setVaultInfo(payload);
-      toast.info("Withdraw request prepared", {
-        description: "You can withdraw after Langclaw approves the amount.",
-      });
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to request withdraw.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await usageRequestsRef.current.runWithdraw(
+      requestChain,
+      async () => {
+        const wallet = await getUsageWalletAuth(requestChain);
+        return requestUsageWithdraw(wallet, requestChain);
+      },
+      {
+        onError(err) {
+          const message = readFriendlyError(err, "Unable to request withdraw.");
+          setError(message);
+          toast.error(message);
+        },
+        onSettled() {
+          setLoading("");
+        },
+        onSuccess(payload) {
+          setWithdraw(payload);
+          setVaultInfo(payload);
+          toast.info("Withdraw request prepared", {
+            description: "You can withdraw after Langclaw approves the amount.",
+          });
+        },
+      },
+    );
   };
 
   const handleWithdrawOnchain = async () => {
+    const requestChain = selectedChain;
+
+    if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+      return;
+    }
+
     const validationError = validateWithdrawalTransaction({
       amount: parsedWithdrawAmount,
       isAuthorized: withdrawalAmountIsCovered,
@@ -816,7 +990,11 @@ export default function UsagePage() {
 
     try {
       await switchChainAsync?.({ chainId: chainConfig.chainId });
-      const withdrawalRequest = withCeloAttribution(selectedChain, {
+      if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+        return;
+      }
+
+      const withdrawalRequest = withCeloAttribution(requestChain, {
         abi: usageVaultAbi,
         address: vaultAddress,
         args: [withdrawalAmount],
@@ -830,37 +1008,40 @@ export default function UsagePage() {
         >[0],
       );
 
+      if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+        return;
+      }
+
       setWithdrawHash(hash);
       toast.success("Withdrawal transaction sent", {
         description: `${shortHash(hash)} is waiting for confirmation.`,
       });
     } catch (err) {
+      if (!usageRequestsRef.current.isCurrentContext(requestChain)) {
+        return;
+      }
+
       const message = readFriendlyError(err, "Unable to withdraw from vault.");
       setError(message);
       toast.error(message);
     } finally {
-      setLoading("");
+      if (usageRequestsRef.current.isCurrentContext(requestChain)) {
+        setLoading("");
+      }
     }
   };
 
   const handleChainChange = (value: string) => {
     const nextChain = value === "celo" ? "celo" : "mantle";
 
-    if (isMiniPay && nextChain !== "celo") {
+    if (
+      isChainSelectionDisabled ||
+      (isMiniPay && nextChain !== "celo")
+    ) {
       return;
     }
 
-    setSelectedChain(nextChain);
-    setBalance(null);
-    setVaultInfo(null);
-    setDeposit(null);
-    setWithdraw(null);
-    setDepositHash(undefined);
-    setWithdrawHash(undefined);
-    setTxHash("");
-    setReference("");
-    setError("");
-    autoCreditHashRef.current = "";
+    resetUsageChainState(nextChain);
   };
 
   return (
@@ -875,13 +1056,18 @@ export default function UsagePage() {
           </p>
         </div>
         <Button
-          disabled={!isConnected || loading === "balance" || isSigning}
+          disabled={shouldDisableBalanceRefresh({
+            isBalanceLoading,
+            isConnected,
+            isSigning,
+            operationLoading: loading,
+          })}
           className="w-full sm:w-auto"
           onClick={() => void refreshBalance()}
           size="sm"
           variant="outline"
         >
-          {loading === "balance" ? (
+          {isBalanceLoading ? (
             <Loader2Icon className="size-4 animate-spin" />
           ) : (
             <RefreshCcwIcon className="size-4" />
@@ -896,7 +1082,11 @@ export default function UsagePage() {
           <span className="text-muted-foreground">USDT credits</span>
         </div>
       ) : (
-        <Select onValueChange={handleChainChange} value={selectedChain}>
+        <Select
+          disabled={isChainSelectionDisabled}
+          onValueChange={handleChainChange}
+          value={selectedChain}
+        >
           <SelectTrigger aria-label="Credits chain" className="w-40" size="sm">
             {chainConfig.name}
           </SelectTrigger>

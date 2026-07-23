@@ -396,6 +396,84 @@ export function createSettingsRequestCoordinator(initialContext: string) {
   };
 }
 
+export function createTelegramGateRequestCoordinator(initialContext: string) {
+  const gateGuard = createLatestRequestGuard();
+  const linkGuard = createLatestRequestGuard();
+  const pollGuard = createLatestRequestGuard();
+  const guards = [gateGuard, linkGuard, pollGuard];
+  let currentContext = normalizeWalletContext(initialContext);
+
+  const begin = (
+    guard: ReturnType<typeof createLatestRequestGuard>,
+    requestContext: string,
+  ) => {
+    const normalizedRequestContext = normalizeWalletContext(requestContext);
+
+    if (
+      !normalizedRequestContext ||
+      normalizedRequestContext !== currentContext
+    ) {
+      return {
+        isCurrent() {
+          return false;
+        },
+      };
+    }
+
+    const request = guard.begin();
+
+    return {
+      isCurrent(walletAddress?: string) {
+        const resultContext =
+          walletAddress === undefined
+            ? normalizedRequestContext
+            : normalizeWalletContext(walletAddress);
+
+        return (
+          request.isCurrent() &&
+          currentContext === normalizedRequestContext &&
+          resultContext === normalizedRequestContext
+        );
+      },
+    };
+  };
+
+  return {
+    beginGate(context: string) {
+      return begin(gateGuard, context);
+    },
+    beginLink(context: string) {
+      return begin(linkGuard, context);
+    },
+    beginPoll(context: string) {
+      return begin(pollGuard, context);
+    },
+    invalidateAll() {
+      for (const guard of guards) {
+        guard.invalidate();
+      }
+    },
+    setContext(context: string) {
+      const normalizedContext = normalizeWalletContext(context);
+
+      if (normalizedContext === currentContext) {
+        return false;
+      }
+
+      currentContext = normalizedContext;
+      for (const guard of guards) {
+        guard.invalidate();
+      }
+
+      return true;
+    },
+  };
+}
+
+function normalizeWalletContext(context: string) {
+  return context.trim().toLowerCase();
+}
+
 export function shouldResetMiniPayChain(
   isMiniPay: boolean,
   selectedChain: string,

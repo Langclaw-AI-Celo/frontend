@@ -134,6 +134,61 @@ export function createUsageRequestCoordinator(initialContext: string) {
   };
 }
 
+export function createApiKeyRequestCoordinator(initialContext: string) {
+  const loadGuard = createLatestRequestGuard();
+  const mutationGuard = createContextRequestGuard();
+  const guards = [loadGuard, mutationGuard];
+  let currentContext = initialContext;
+
+  const run = <T>(
+    guard: ReturnType<typeof createLatestRequestGuard>,
+    requestContext: string,
+    load: () => Promise<T>,
+    handlers: LatestRequestHandlers<T>,
+  ) => {
+    if (!requestContext || requestContext !== currentContext) {
+      return Promise.resolve(false);
+    }
+
+    return runLatestRequest(guard, load, handlers);
+  };
+
+  return {
+    invalidateAll() {
+      for (const guard of guards) {
+        guard.invalidate();
+      }
+    },
+    isCurrentContext(context: string) {
+      return context === currentContext;
+    },
+    runLoad<T>(
+      context: string,
+      load: () => Promise<T>,
+      handlers: LatestRequestHandlers<T>,
+    ) {
+      return run(loadGuard, context, load, handlers);
+    },
+    runMutation<T>(
+      context: string,
+      load: () => Promise<T>,
+      handlers: LatestRequestHandlers<T>,
+    ) {
+      return run(mutationGuard, context, load, handlers);
+    },
+    setContext(context: string) {
+      if (context === currentContext) {
+        return;
+      }
+
+      currentContext = context;
+      for (const guard of guards) {
+        guard.invalidate();
+      }
+    },
+  };
+}
+
 export function createSettingsRequestCoordinator(initialContext: string) {
   const loadGuard = createLatestRequestGuard();
   const mutationGuard = createContextRequestGuard();

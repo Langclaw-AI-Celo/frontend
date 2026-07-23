@@ -249,6 +249,36 @@ export function createMemoryRequestCoordinator(initialContext: string) {
   };
 }
 
+export function createProofsRequestCoordinator(initialContext: string) {
+  const loadGuard = createLatestRequestGuard();
+  let currentContext = initialContext;
+
+  return {
+    invalidateAll() {
+      loadGuard.invalidate();
+    },
+    runLoad<T>(
+      context: string,
+      load: () => Promise<T>,
+      handlers: LatestRequestHandlers<T>,
+    ) {
+      if (context !== currentContext) {
+        return Promise.resolve(false);
+      }
+
+      return runLatestRequest(loadGuard, load, handlers);
+    },
+    setContext(context: string) {
+      if (context === currentContext) {
+        return;
+      }
+
+      currentContext = context;
+      loadGuard.invalidate();
+    },
+  };
+}
+
 export function createSettingsRequestCoordinator(initialContext: string) {
   const loadGuard = createLatestRequestGuard();
   const mutationGuard = createContextRequestGuard();

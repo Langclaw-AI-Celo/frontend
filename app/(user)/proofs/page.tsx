@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircleIcon,
   DatabaseIcon,
@@ -59,73 +59,115 @@ import {
   resolveProductChain,
 } from "@/lib/chains";
 import { safeExternalUrl } from "@/lib/external-url";
+import { createProofsRequestCoordinator } from "@/lib/latest-request";
 
 export default function ProofsPage() {
   const [selectedChain, setSelectedChain] =
     useState<ProductChainId>(defaultProductChain);
+  const [queryReady, setQueryReady] = useState(false);
   const [payload, setPayload] = useState<ProofDecisionsPayload | null>(null);
   const [strategyPayload, setStrategyPayload] =
     useState<StrategyRunsPayload | null>(null);
   const [error, setError] = useState("");
   const [strategyError, setStrategyError] = useState("");
   const [loading, setLoading] = useState(false);
+  const proofRequestsRef = useRef(
+    createProofsRequestCoordinator(defaultProductChain),
+  );
   const chainConfig = resolveProductChain(selectedChain);
+
+  const selectProofChain = useCallback((chain: ProductChainId) => {
+    proofRequestsRef.current.setContext(chain);
+    setSelectedChain(chain);
+    setPayload(null);
+    setStrategyPayload(null);
+    setError("");
+    setStrategyError("");
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const chain = params.get("chain");
+    const timeoutId = window.setTimeout(() => {
+      if (chain === "celo" || chain === "mantle") {
+        selectProofChain(chain);
+      }
 
-    if (chain === "celo" || chain === "mantle") {
-      const timeoutId = window.setTimeout(() => {
-        setSelectedChain(chain);
-      }, 0);
+      setQueryReady(true);
+    }, 0);
 
-      return () => window.clearTimeout(timeoutId);
-    }
-  }, []);
+    return () => window.clearTimeout(timeoutId);
+  }, [selectProofChain]);
 
   const loadProofs = useCallback(async () => {
+    const requestChain = selectedChain;
+
+    proofRequestsRef.current.setContext(requestChain);
     setLoading(true);
     setError("");
     setStrategyError("");
 
-    const [decisionResult, strategyResult] = await Promise.allSettled([
-      listProofDecisions(25, selectedChain),
-      listStrategyRuns(25, selectedChain),
-    ]);
+    await proofRequestsRef.current.runLoad(
+      requestChain,
+      () =>
+        Promise.allSettled([
+          listProofDecisions(25, requestChain),
+          listStrategyRuns(25, requestChain),
+        ]),
+      {
+        onError: (loadError) => {
+          const message = readFriendlyError(
+            loadError,
+            "Unable to load Proof Center.",
+          );
 
-    if (decisionResult.status === "fulfilled") {
-      setPayload(decisionResult.value);
-    } else {
-      setError(
-        readFriendlyError(
-          decisionResult.reason,
-          "Unable to load proof decisions.",
-        ),
-      );
-    }
+          setError(message);
+          setStrategyError(message);
+        },
+        onSettled: () => setLoading(false),
+        onSuccess: ([decisionResult, strategyResult]) => {
+          if (decisionResult.status === "fulfilled") {
+            setPayload(decisionResult.value);
+          } else {
+            setError(
+              readFriendlyError(
+                decisionResult.reason,
+                "Unable to load proof decisions.",
+              ),
+            );
+          }
 
-    if (strategyResult.status === "fulfilled") {
-      setStrategyPayload(strategyResult.value);
-    } else {
-      setStrategyError(
-        readFriendlyError(
-          strategyResult.reason,
-          "Unable to load strategy journal records.",
-        ),
-      );
-    }
-
-    setLoading(false);
+          if (strategyResult.status === "fulfilled") {
+            setStrategyPayload(strategyResult.value);
+          } else {
+            setStrategyError(
+              readFriendlyError(
+                strategyResult.reason,
+                "Unable to load strategy journal records.",
+              ),
+            );
+          }
+        },
+      },
+    );
   }, [selectedChain]);
 
   useEffect(() => {
+    if (!queryReady) {
+      return;
+    }
+
+    const proofRequests = proofRequestsRef.current;
     const timeoutId = window.setTimeout(() => {
       void loadProofs();
     }, 0);
 
-    return () => window.clearTimeout(timeoutId);
-  }, [loadProofs]);
+    return () => {
+      window.clearTimeout(timeoutId);
+      proofRequests.invalidateAll();
+    };
+  }, [loadProofs, queryReady]);
 
   const decisions = useMemo(() => payload?.decisions ?? [], [payload?.decisions]);
   const strategyRecords = useMemo(
@@ -173,7 +215,7 @@ export default function ProofsPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Select
             onValueChange={(value) =>
-              setSelectedChain(value === "celo" ? "celo" : "mantle")
+              selectProofChain(value === "celo" ? "celo" : "mantle")
             }
             value={selectedChain}
           >

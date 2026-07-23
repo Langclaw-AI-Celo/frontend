@@ -161,7 +161,10 @@ import {
   isTelegramLinkRequiredError,
   useTelegramConnectGate,
 } from "@/components/TelegramConnectDialog";
-import { createChatSessionsRequestCoordinator } from "@/lib/latest-request";
+import {
+  createChatPersistenceQueue,
+  createChatSessionsRequestCoordinator,
+} from "@/lib/latest-request";
 import { cn } from "@/lib/utils";
 
 type ChatProps = {
@@ -237,6 +240,8 @@ const Chat = ({ sessionId }: ChatProps) => {
   const chatRequestsRef = useRef(
     createChatSessionsRequestCoordinator(walletContext),
   );
+  const chatPersistenceQueueRef = useRef(createChatPersistenceQueue());
+  const chatContextGenerationRef = useRef(0);
   const sessionRef = useRef<ChatSession | null>(null);
   const sessionContextRef = useRef("");
   const activeChatContextRef = useRef("");
@@ -271,14 +276,37 @@ const Chat = ({ sessionId }: ChatProps) => {
         return false;
       }
 
+      const persistenceContext = JSON.stringify([
+        requestContext,
+        nextSession.id,
+      ]);
+      const persistenceGeneration = chatContextGenerationRef.current;
+
       return chatRequestsRef.current.runMutation(
         requestContext,
         sessionContextRef.current,
-        async () => {
-          const wallet = await getWalletForContext(requestContext);
-          await upsertChatSession(wallet, nextSession);
-          return true;
-        },
+        () =>
+          chatPersistenceQueueRef.current.enqueue(
+            persistenceContext,
+            async () => {
+              if (
+                chatContextGenerationRef.current !== persistenceGeneration
+              ) {
+                return false;
+              }
+
+              const wallet = await getWalletForContext(requestContext);
+
+              if (
+                chatContextGenerationRef.current !== persistenceGeneration
+              ) {
+                return false;
+              }
+
+              await upsertChatSession(wallet, nextSession);
+              return true;
+            },
+          ),
         {
           onError: (saveError) => {
             const message =
@@ -364,6 +392,7 @@ const Chat = ({ sessionId }: ChatProps) => {
   useLayoutEffect(() => {
     const chatRequests = chatRequestsRef.current;
 
+    chatContextGenerationRef.current += 1;
     chatRequests.invalidateAll();
     chatRequestsRef.current.setContext(walletContext);
     activeChatContextRef.current = "";
@@ -382,6 +411,7 @@ const Chat = ({ sessionId }: ChatProps) => {
     const chatRequests = chatRequestsRef.current;
 
     return () => {
+      chatContextGenerationRef.current += 1;
       activeChatContextRef.current = "";
       sessionContextRef.current = "";
       chatRequests.invalidateAll();

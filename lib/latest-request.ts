@@ -42,6 +42,30 @@ type LatestRequestHandlers<T> = {
   onSuccess: (value: T) => void;
 };
 
+export function createChatPersistenceQueue() {
+  const tails = new Map<string, Promise<void>>();
+
+  return {
+    enqueue<T>(context: string, operation: () => Promise<T>) {
+      const tail = tails.get(context) ?? Promise.resolve();
+      const result = tail.then(operation);
+      const settled = result.then(
+        () => undefined,
+        () => undefined,
+      );
+
+      tails.set(context, settled);
+      void settled.then(() => {
+        if (tails.get(context) === settled) {
+          tails.delete(context);
+        }
+      });
+
+      return result;
+    },
+  };
+}
+
 export function createUsageRequestCoordinator(initialContext: string) {
   const balanceGuard = createLatestRequestGuard();
   const depositGuard = createLatestRequestGuard();

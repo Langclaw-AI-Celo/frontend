@@ -381,7 +381,10 @@ export default function StrategyPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select onValueChange={handleChainChange} value={selectedChain}>
-            <SelectTrigger className="h-9 w-[150px]">
+            <SelectTrigger
+              aria-label="Strategy chain"
+              className="h-9 w-[150px]"
+            >
               <SelectValue placeholder="Select chain" />
             </SelectTrigger>
             <SelectContent>

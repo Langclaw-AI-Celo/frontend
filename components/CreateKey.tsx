@@ -326,6 +326,7 @@ export default function CreateKey() {
                 </DialogHeader>
                 <div className="space-y-3">
                   <Input
+                    aria-label="API key name"
                     onChange={(event) => setName(event.currentTarget.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {

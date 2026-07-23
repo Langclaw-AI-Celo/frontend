@@ -219,7 +219,10 @@ export default function ProofsPage() {
             }
             value={selectedChain}
           >
-            <SelectTrigger className="h-9 w-[150px]">
+            <SelectTrigger
+              aria-label="Proof chain"
+              className="h-9 w-[150px]"
+            >
               <SelectValue placeholder="Select chain" />
             </SelectTrigger>
             <SelectContent>

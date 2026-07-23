@@ -17,6 +17,25 @@ export function createLatestRequestGuard() {
   };
 }
 
+function createContextRequestGuard() {
+  let generation = 0;
+
+  return {
+    begin() {
+      const requestGeneration = generation;
+
+      return {
+        isCurrent() {
+          return requestGeneration === generation;
+        },
+      };
+    },
+    invalidate() {
+      generation += 1;
+    },
+  };
+}
+
 type LatestRequestHandlers<T> = {
   onError: (error: unknown) => void;
   onSettled?: () => void;
@@ -101,6 +120,77 @@ export function createUsageRequestCoordinator(initialContext: string) {
       handlers: LatestRequestHandlers<T>,
     ) {
       return run(withdrawGuard, context, load, handlers);
+    },
+    setContext(context: string) {
+      if (context === currentContext) {
+        return;
+      }
+
+      currentContext = context;
+      for (const guard of guards) {
+        guard.invalidate();
+      }
+    },
+  };
+}
+
+export function createSettingsRequestCoordinator(initialContext: string) {
+  const loadGuard = createLatestRequestGuard();
+  const mutationGuard = createContextRequestGuard();
+  const telegramPollGuard = createLatestRequestGuard();
+  const guards = [loadGuard, mutationGuard, telegramPollGuard];
+  let currentContext = initialContext;
+
+  const run = <T>(
+    guard: ReturnType<typeof createLatestRequestGuard>,
+    requestContext: string,
+    load: () => Promise<T>,
+    handlers: LatestRequestHandlers<T>,
+  ) => {
+    if (!requestContext || requestContext !== currentContext) {
+      return Promise.resolve(false);
+    }
+
+    return runLatestRequest(guard, load, handlers);
+  };
+
+  return {
+    invalidateAll() {
+      for (const guard of guards) {
+        guard.invalidate();
+      }
+    },
+    invalidateTelegramPoll() {
+      telegramPollGuard.invalidate();
+    },
+    isCurrentContext(context: string) {
+      return Boolean(context) && context === currentContext;
+    },
+    runLoad<T>(
+      context: string,
+      load: () => Promise<T>,
+      handlers: LatestRequestHandlers<T>,
+    ) {
+      return run(loadGuard, context, load, handlers);
+    },
+    runMutation<T>(
+      context: string,
+      settingsContext: string,
+      load: () => Promise<T>,
+      handlers: LatestRequestHandlers<T>,
+    ) {
+      if (settingsContext !== currentContext) {
+        return Promise.resolve(false);
+      }
+
+      return run(mutationGuard, context, load, handlers);
+    },
+    runTelegramPoll<T>(
+      context: string,
+      load: () => Promise<T>,
+      handlers: LatestRequestHandlers<T>,
+    ) {
+      return run(telegramPollGuard, context, load, handlers);
     },
     setContext(context: string) {
       if (context === currentContext) {

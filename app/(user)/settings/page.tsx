@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertCircle,
   Bell,
@@ -44,6 +50,7 @@ import {
 } from "@/components/ui/tabs";
 import { useWalletSession } from "@/hooks/use-wallet-session";
 import { safeExternalUrl } from "@/lib/external-url";
+import { createSettingsRequestCoordinator } from "@/lib/latest-request";
 import {
   createAutomationTelegramLink,
   getMemorySettings,
@@ -65,88 +72,232 @@ import {
 } from "@/lib/langclaw-api";
 
 export default function Page() {
-  const { getWalletAuth, isConnected, isSigning, openWalletModal } =
+  const { address, getWalletAuth, isConnected, isSigning, openWalletModal } =
     useWalletSession();
-  const [dashboard, setDashboard] = useState<AutomationDashboard | null>(null);
-  const [settings, setSettings] = useState<AutomationSettings | null>(null);
-  const [memorySettings, setMemorySettings] = useState<MemorySettings | null>(
-    null,
-  );
-  const [balance, setBalance] = useState<UsageBalancePayload | null>(null);
-  const [email, setEmail] = useState("");
-  const [emailCode, setEmailCode] = useState("");
-  const [telegramCommand, setTelegramCommand] = useState("");
-  const [telegramDeepLink, setTelegramDeepLink] = useState("");
-  const [telegramBotUsername, setTelegramBotUsername] =
+  const [dashboardState, setDashboard] =
+    useState<AutomationDashboard | null>(null);
+  const [settingsState, setSettings] =
+    useState<AutomationSettings | null>(null);
+  const [memorySettingsState, setMemorySettings] =
+    useState<MemorySettings | null>(null);
+  const [balanceState, setBalance] =
+    useState<UsageBalancePayload | null>(null);
+  const [emailState, setEmail] = useState("");
+  const [emailCodeState, setEmailCode] = useState("");
+  const [telegramCommandState, setTelegramCommand] = useState("");
+  const [telegramDeepLinkState, setTelegramDeepLink] = useState("");
+  const [telegramBotUsernameState, setTelegramBotUsername] =
     useState("langclawaibot");
-  const [telegramPolling, setTelegramPolling] = useState(false);
-  const [telegramStatus, setTelegramStatus] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState("");
+  const [telegramPollingState, setTelegramPolling] = useState(false);
+  const [telegramStatusState, setTelegramStatus] = useState("");
+  const [errorState, setError] = useState("");
+  const [loadingState, setLoading] = useState("");
+  const [settingsContext, setSettingsContext] = useState("");
   const telegramPollTimerRef = useRef<number | null>(null);
+  const walletContext =
+    isConnected && address ? address.trim().toLowerCase() : "";
+  const settingsRequestsRef = useRef(
+    createSettingsRequestCoordinator(walletContext),
+  );
+  const settingsContextRef = useRef("");
+  const accountStateIsCurrent =
+    Boolean(walletContext) && settingsContext === walletContext;
+  const dashboard = accountStateIsCurrent ? dashboardState : null;
+  const settings = accountStateIsCurrent ? settingsState : null;
+  const memorySettings = accountStateIsCurrent ? memorySettingsState : null;
+  const balance = accountStateIsCurrent ? balanceState : null;
+  const email = accountStateIsCurrent ? emailState : "";
+  const emailCode = accountStateIsCurrent ? emailCodeState : "";
+  const telegramCommand = accountStateIsCurrent ? telegramCommandState : "";
+  const telegramDeepLink = accountStateIsCurrent
+    ? telegramDeepLinkState
+    : "";
+  const telegramBotUsername = accountStateIsCurrent
+    ? telegramBotUsernameState
+    : "langclawaibot";
+  const telegramPolling = accountStateIsCurrent
+    ? telegramPollingState
+    : false;
+  const telegramStatus = accountStateIsCurrent ? telegramStatusState : "";
+  const error = accountStateIsCurrent ? errorState : "";
+  const loading = accountStateIsCurrent ? loadingState : "";
   const balanceSymbol = balance?.nativeSymbol ?? "USDT";
 
-  const loadSettings = useCallback(async () => {
-    if (!isConnected) {
-      setDashboard(null);
-      setSettings(null);
-      setMemorySettings(null);
-      setBalance(null);
-      return;
-    }
-
-    setLoading("load");
-    setError("");
-
-    try {
-      const wallet = await getWalletAuth();
-      const [automation, usage, memory] = await Promise.all([
-        getAutomationDashboard(wallet),
-        getUsageBalance(wallet).catch(() => null),
-        getMemorySettings(wallet),
-      ]);
-      setDashboard(automation);
-      setSettings(automation.settings);
-      setMemorySettings(memory);
-      setBalance(usage);
-      setEmail(automation.settings.notificationEmail ?? "");
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to load settings.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
-  }, [getWalletAuth, isConnected]);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      void loadSettings();
-    }, 0);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [loadSettings]);
-
   const clearTelegramPollTimer = useCallback(() => {
+    settingsRequestsRef.current.invalidateTelegramPoll();
+
     if (telegramPollTimerRef.current !== null) {
       window.clearTimeout(telegramPollTimerRef.current);
       telegramPollTimerRef.current = null;
     }
   }, []);
 
-  useEffect(() => {
-    return () => clearTelegramPollTimer();
-  }, [clearTelegramPollTimer]);
+  const getWalletForContext = useCallback(
+    async (requestContext: string) => {
+      const wallet = await getWalletAuth();
 
-  const requireWallet = async () => {
-    if (!isConnected) {
-      openWalletModal();
-      throw new Error("Choose a wallet to update settings.");
+      if (
+        !settingsRequestsRef.current.isCurrentContext(requestContext) ||
+        wallet.address.trim().toLowerCase() !== requestContext
+      ) {
+        return null;
+      }
+
+      return wallet;
+    },
+    [getWalletAuth],
+  );
+
+  const loadSettings = useCallback(async () => {
+    const requestContext = walletContext;
+
+    if (!settingsRequestsRef.current.isCurrentContext(requestContext)) {
+      return;
     }
 
-    return getWalletAuth();
-  };
+    setLoading("load");
+    setError("");
 
+    await settingsRequestsRef.current.runLoad(
+      requestContext,
+      async () => {
+        const wallet = await getWalletForContext(requestContext);
+
+        if (!wallet) {
+          return null;
+        }
+
+        const [automation, usage, memory] = await Promise.all([
+          getAutomationDashboard(wallet),
+          getUsageBalance(wallet).catch(() => null),
+          getMemorySettings(wallet),
+        ]);
+
+        return { automation, memory, usage };
+      },
+      {
+        onError: (err) => {
+          const message = readFriendlyError(err, "Unable to load settings.");
+          setError(message);
+          toast.error(message);
+        },
+        onSettled: () => setLoading(""),
+        onSuccess: (payload) => {
+          if (!payload) {
+            return;
+          }
+
+          settingsContextRef.current = requestContext;
+          setSettingsContext(requestContext);
+          setDashboard(payload.automation);
+          setSettings(payload.automation.settings);
+          setMemorySettings(payload.memory);
+          setBalance(payload.usage);
+          setEmail(payload.automation.settings.notificationEmail ?? "");
+        },
+      },
+    );
+  }, [getWalletForContext, walletContext]);
+
+  useLayoutEffect(() => {
+    settingsRequestsRef.current.setContext(walletContext);
+    settingsContextRef.current = "";
+    clearTelegramPollTimer();
+  }, [clearTelegramPollTimer, walletContext]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDashboard(null);
+      setSettings(null);
+      setMemorySettings(null);
+      setBalance(null);
+      setEmail("");
+      setEmailCode("");
+      setTelegramCommand("");
+      setTelegramDeepLink("");
+      setTelegramBotUsername("langclawaibot");
+      setTelegramPolling(false);
+      setTelegramStatus("");
+      setError("");
+      setLoading("");
+      settingsContextRef.current = walletContext;
+      setSettingsContext(walletContext);
+
+      if (walletContext) {
+        void loadSettings();
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [clearTelegramPollTimer, loadSettings, walletContext]);
+
+  useEffect(() => {
+    const settingsRequests = settingsRequestsRef.current;
+
+    return () => {
+      clearTelegramPollTimer();
+      settingsRequests.invalidateAll();
+    };
+  }, [clearTelegramPollTimer]);
+
+  const runSettingsMutation = useCallback(
+    async <T,>(
+      loadingState: string,
+      fallbackError: string,
+      operation: (
+        wallet: NonNullable<Awaited<ReturnType<typeof getWalletForContext>>>,
+      ) => Promise<T>,
+      onSuccess: (value: T, requestContext: string) => void,
+    ) => {
+      const requestContext = walletContext;
+
+      if (!requestContext) {
+        const message = "Choose a wallet to update settings.";
+        setError(message);
+        toast.error(message);
+        openWalletModal();
+        return false;
+      }
+
+      if (
+        !settingsRequestsRef.current.isCurrentContext(requestContext) ||
+        settingsContextRef.current !== requestContext
+      ) {
+        return false;
+      }
+
+      setLoading(loadingState);
+      setError("");
+
+      return settingsRequestsRef.current.runMutation(
+        requestContext,
+        settingsContextRef.current,
+        async () => {
+          const wallet = await getWalletForContext(requestContext);
+
+          if (!wallet) {
+            return null;
+          }
+
+          return { value: await operation(wallet) };
+        },
+        {
+          onError: (err) => {
+            const message = readFriendlyError(err, fallbackError);
+            setError(message);
+            toast.error(message);
+          },
+          onSettled: () => setLoading(""),
+          onSuccess: (result) => {
+            if (result) {
+              onSuccess(result.value, requestContext);
+            }
+          },
+        },
+      );
+    },
+    [getWalletForContext, openWalletModal, walletContext],
+  );
   const patchSettings = (patch: Partial<AutomationSettings>) => {
     setSettings((current) => (current ? { ...current, ...patch } : current));
   };
@@ -183,47 +334,51 @@ export default function Page() {
       return;
     }
 
-    setLoading("save");
-    setError("");
+    const settingsSnapshot = settings;
+    const memorySettingsSnapshot = memorySettings;
 
-    try {
-      const wallet = await requireWallet();
-      const [next, nextMemory] = await Promise.all([
-        updateAutomationSettings(wallet, {
-          autoPauseRepeatedFailures: settings.autoPauseRepeatedFailures,
-          dailyLimit0G: settings.dailyLimit0G,
-          failureNotification: settings.failureNotification,
-          limitBehavior: settings.limitBehavior,
-          lowBalanceThreshold0G: settings.lowBalanceThreshold0G,
-          monthlyCap0G: settings.monthlyCap0G,
-          notificationChannels: settings.notificationChannels,
-          retryPolicy: settings.retryPolicy,
-          thresholdAction: settings.thresholdAction,
-          writeRunLogsToMemory: settings.writeRunLogsToMemory,
-        }),
-        memorySettings
-          ? updateMemorySettings(wallet, {
-              autoDisableLowConfidence:
-                memorySettings.autoDisableLowConfidence,
-              captureEnabled: memorySettings.captureEnabled,
-              crossChatRecall: memorySettings.crossChatRecall,
-              projectScopedRecall: memorySettings.projectScopedRecall,
-              retentionDays: memorySettings.retentionDays,
-            })
-          : Promise.resolve(null),
-      ]);
-      setSettings(next);
-      if (nextMemory) {
-        setMemorySettings(nextMemory);
-      }
-      toast.success("Settings saved");
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to save settings.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await runSettingsMutation(
+      "save",
+      "Unable to save settings.",
+      async (wallet) =>
+        Promise.all([
+          updateAutomationSettings(wallet, {
+            autoPauseRepeatedFailures:
+              settingsSnapshot.autoPauseRepeatedFailures,
+            dailyLimit0G: settingsSnapshot.dailyLimit0G,
+            failureNotification: settingsSnapshot.failureNotification,
+            limitBehavior: settingsSnapshot.limitBehavior,
+            lowBalanceThreshold0G: settingsSnapshot.lowBalanceThreshold0G,
+            monthlyCap0G: settingsSnapshot.monthlyCap0G,
+            notificationChannels: settingsSnapshot.notificationChannels,
+            retryPolicy: settingsSnapshot.retryPolicy,
+            thresholdAction: settingsSnapshot.thresholdAction,
+            writeRunLogsToMemory: settingsSnapshot.writeRunLogsToMemory,
+          }),
+          memorySettingsSnapshot
+            ? updateMemorySettings(wallet, {
+                autoDisableLowConfidence:
+                  memorySettingsSnapshot.autoDisableLowConfidence,
+                captureEnabled: memorySettingsSnapshot.captureEnabled,
+                crossChatRecall: memorySettingsSnapshot.crossChatRecall,
+                projectScopedRecall:
+                  memorySettingsSnapshot.projectScopedRecall,
+                retentionDays: memorySettingsSnapshot.retentionDays,
+              })
+            : Promise.resolve(null),
+        ]),
+      ([next, nextMemory], requestContext) => {
+        settingsContextRef.current = requestContext;
+        setSettingsContext(requestContext);
+        setSettings(next);
+
+        if (nextMemory) {
+          setMemorySettings(nextMemory);
+        }
+
+        toast.success("Settings saved");
+      },
+    );
   };
 
   const handleRequestEmail = async () => {
@@ -232,22 +387,22 @@ export default function Page() {
       return;
     }
 
-    setLoading("email");
-    setError("");
+    const requestedEmail = email.trim();
+    let shouldReload = false;
+    const handled = await runSettingsMutation(
+      "email",
+      "Unable to send email code.",
+      (wallet) => requestAutomationEmailLink(wallet, requestedEmail),
+      (payload) => {
+        shouldReload = true;
+        toast.success("Verification code sent", {
+          description: payload.link.email,
+        });
+      },
+    );
 
-    try {
-      const wallet = await requireWallet();
-      const payload = await requestAutomationEmailLink(wallet, email.trim());
-      toast.success("Verification code sent", {
-        description: payload.link.email,
-      });
+    if (handled && shouldReload) {
       await loadSettings();
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to send email code.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
     }
   };
 
@@ -257,160 +412,192 @@ export default function Page() {
       return;
     }
 
-    setLoading("verify-email");
-    setError("");
+    const requestedCode = emailCode.trim();
 
-    try {
-      const wallet = await requireWallet();
-      const next = await verifyAutomationEmailLink(wallet, emailCode.trim());
-      setSettings(next);
-      setEmail(next.notificationEmail ?? "");
-      setEmailCode("");
-      toast.success("Email linked");
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to verify email.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await runSettingsMutation(
+      "verify-email",
+      "Unable to verify email.",
+      (wallet) => verifyAutomationEmailLink(wallet, requestedCode),
+      (next, requestContext) => {
+        settingsContextRef.current = requestContext;
+        setSettingsContext(requestContext);
+        setSettings(next);
+        setEmail(next.notificationEmail ?? "");
+        setEmailCode("");
+        toast.success("Email linked");
+      },
+    );
   };
 
   const handleUnlinkEmail = async () => {
-    setLoading("unlink-email");
-    setError("");
-
-    try {
-      const wallet = await requireWallet();
-      const next = await unlinkAutomationEmail(wallet);
-      setSettings(next);
-      setEmail("");
-      setEmailCode("");
-      toast.success("Email unlinked");
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to unlink email.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await runSettingsMutation(
+      "unlink-email",
+      "Unable to unlink email.",
+      unlinkAutomationEmail,
+      (next, requestContext) => {
+        settingsContextRef.current = requestContext;
+        setSettingsContext(requestContext);
+        setSettings(next);
+        setEmail("");
+        setEmailCode("");
+        toast.success("Email unlinked");
+      },
+    );
   };
 
   const startTelegramPolling = useCallback(
-    (expiresAt: string, botUsername: string) => {
+    (requestContext: string, expiresAt: string, botUsername: string) => {
       const expiresAtMs = new Date(expiresAt).getTime();
       clearTelegramPollTimer();
+
+      if (!settingsRequestsRef.current.isCurrentContext(requestContext)) {
+        return;
+      }
+
       setTelegramPolling(true);
       setTelegramStatus(`Waiting for @${botUsername} confirmation...`);
 
       const poll = async () => {
+        telegramPollTimerRef.current = null;
+
+        if (!settingsRequestsRef.current.isCurrentContext(requestContext)) {
+          return;
+        }
+
         if (Date.now() >= expiresAtMs) {
           setTelegramPolling(false);
           setTelegramStatus("Telegram link expired. Create a new link.");
           return;
         }
 
-        try {
-          const wallet = await getWalletAuth();
-          const payload = await pollAutomationTelegramLink(wallet);
+        await settingsRequestsRef.current.runTelegramPoll(
+          requestContext,
+          async () => {
+            const wallet = await getWalletForContext(requestContext);
 
-          if (payload.settings) {
-            setSettings(payload.settings);
-          }
+            if (!wallet) {
+              return null;
+            }
 
-          if (payload.linked) {
-            setTelegramPolling(false);
-            setTelegramStatus("Telegram linked.");
-            setTelegramCommand("");
-            setTelegramDeepLink("");
-            toast.success("Telegram linked");
-            return;
-          }
+            return pollAutomationTelegramLink(wallet);
+          },
+          {
+            onError: (err) => {
+              const message = readFriendlyError(
+                err,
+                "Unable to check Telegram link.",
+              );
+              setTelegramPolling(false);
+              setTelegramStatus(message);
+              setError(message);
+              toast.error(message);
+            },
+            onSuccess: (payload) => {
+              if (!payload) {
+                return;
+              }
 
-          setTelegramStatus(`Waiting for @${botUsername} confirmation...`);
-          telegramPollTimerRef.current = window.setTimeout(poll, 3000);
-        } catch (err) {
-          const message = readFriendlyError(
-            err,
-            "Unable to check Telegram link.",
-          );
-          setTelegramPolling(false);
-          setTelegramStatus(message);
-          setError(message);
-          toast.error(message);
-        }
+              if (payload.settings) {
+                settingsContextRef.current = requestContext;
+                setSettingsContext(requestContext);
+                setSettings(payload.settings);
+              }
+
+              if (payload.linked) {
+                setTelegramPolling(false);
+                setTelegramStatus("Telegram linked.");
+                setTelegramCommand("");
+                setTelegramDeepLink("");
+                toast.success("Telegram linked");
+                return;
+              }
+
+              setTelegramStatus(
+                `Waiting for @${botUsername} confirmation...`,
+              );
+              telegramPollTimerRef.current = window.setTimeout(poll, 3000);
+            },
+          },
+        );
       };
 
       telegramPollTimerRef.current = window.setTimeout(poll, 1500);
     },
-    [clearTelegramPollTimer, getWalletAuth],
+    [clearTelegramPollTimer, getWalletForContext],
   );
 
   const handleTelegramLink = async () => {
-    setLoading("telegram");
-    setError("");
     clearTelegramPollTimer();
 
     const telegramWindow = window.open("about:blank", "_blank");
 
-    try {
-      const wallet = await requireWallet();
-      const link = await createAutomationTelegramLink(wallet);
-      const deepLink = safeExternalUrl(link.deepLink);
+    const handled = await runSettingsMutation(
+      "telegram",
+      "Unable to create Telegram link.",
+      async (wallet) => {
+        try {
+          const link = await createAutomationTelegramLink(wallet);
+          const deepLink = safeExternalUrl(link.deepLink);
 
-      if (!deepLink) {
-        throw new Error("Telegram returned an invalid link.");
-      }
+          if (!deepLink) {
+            throw new Error("Telegram returned an invalid link.");
+          }
 
-      setTelegramCommand(link.command);
-      setTelegramDeepLink(deepLink);
-      setTelegramBotUsername(link.botUsername);
-      setTelegramStatus(`Waiting for @${link.botUsername} confirmation...`);
+          return { deepLink, link };
+        } catch (err) {
+          telegramWindow?.close();
+          throw err;
+        }
+      },
+      ({ deepLink, link }, requestContext) => {
+        setTelegramCommand(link.command);
+        setTelegramDeepLink(deepLink);
+        setTelegramBotUsername(link.botUsername);
+        setTelegramStatus(`Waiting for @${link.botUsername} confirmation...`);
 
-      if (telegramWindow) {
-        telegramWindow.opener = null;
-        telegramWindow.location.href = deepLink;
-      } else {
-        setTelegramStatus(
-          `Open @${link.botUsername} and send the fallback command below.`,
+        if (telegramWindow) {
+          telegramWindow.opener = null;
+          telegramWindow.location.href = deepLink;
+        } else {
+          setTelegramStatus(
+            `Open @${link.botUsername} and send the fallback command below.`,
+          );
+        }
+
+        startTelegramPolling(
+          requestContext,
+          link.expiresAt,
+          link.botUsername,
         );
-      }
+        toast.success("Telegram link opened", {
+          description: `Confirm the chat with @${link.botUsername}.`,
+        });
+      },
+    );
 
-      startTelegramPolling(link.expiresAt, link.botUsername);
-      toast.success("Telegram link opened", {
-        description: `Confirm the chat with @${link.botUsername}.`,
-      });
-    } catch (err) {
+    if (!handled) {
       telegramWindow?.close();
-      const message = readFriendlyError(err, "Unable to create Telegram link.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
     }
   };
 
   const handleUnlinkTelegram = async () => {
-    setLoading("unlink-telegram");
-    setError("");
     clearTelegramPollTimer();
 
-    try {
-      const wallet = await requireWallet();
-      const next = await unlinkAutomationTelegram(wallet);
-      setSettings(next);
-      setTelegramPolling(false);
-      setTelegramStatus("");
-      setTelegramCommand("");
-      setTelegramDeepLink("");
-      toast.success("Telegram unlinked");
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to unlink Telegram.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await runSettingsMutation(
+      "unlink-telegram",
+      "Unable to unlink Telegram.",
+      unlinkAutomationTelegram,
+      (next, requestContext) => {
+        settingsContextRef.current = requestContext;
+        setSettingsContext(requestContext);
+        setSettings(next);
+        setTelegramPolling(false);
+        setTelegramStatus("");
+        setTelegramCommand("");
+        setTelegramDeepLink("");
+        toast.success("Telegram unlinked");
+      },
+    );
   };
 
   return (

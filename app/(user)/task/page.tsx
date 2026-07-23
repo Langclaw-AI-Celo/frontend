@@ -480,6 +480,7 @@ export default function Page() {
               <div className="relative w-full md:max-w-xs">
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
+                  aria-label="Search tasks"
                   className="pl-8"
                   onChange={(event) => setQuery(event.currentTarget.value)}
                   placeholder="Search tasks..."
@@ -615,6 +616,7 @@ export default function Page() {
             </CardHeader>
             <CardContent className="space-y-3">
               <Input
+                aria-label="Task name"
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
@@ -625,6 +627,7 @@ export default function Page() {
                 value={form.name}
               />
               <Input
+                aria-label="Task project"
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
@@ -635,6 +638,7 @@ export default function Page() {
                 value={form.project}
               />
               <Textarea
+                aria-label="Task prompt"
                 className="min-h-24"
                 onChange={(event) =>
                   setForm((current) => ({
@@ -700,6 +704,7 @@ export default function Page() {
                 </div>
               ) : form.triggerType === "event" ? (
                 <Input
+                  aria-label="Event name"
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,

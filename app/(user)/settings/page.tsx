@@ -759,6 +759,7 @@ export default function Page() {
             <CardContent className="space-y-3">
               <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
                 <Input
+                  aria-label="Notification email"
                   onChange={(event) => setEmail(event.currentTarget.value)}
                   placeholder="alerts@company.com"
                   type="email"
@@ -788,6 +789,7 @@ export default function Page() {
               </div>
               <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
                 <Input
+                  aria-label="Email verification code"
                   onChange={(event) => setEmailCode(event.currentTarget.value)}
                   placeholder="Verification code"
                   value={emailCode}

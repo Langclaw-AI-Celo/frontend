@@ -723,6 +723,7 @@ export function AppSidebar() {
             }}
           >
             <Input
+              aria-label="Chat title"
               autoFocus
               maxLength={120}
               onChange={(event) => setRenameTitle(event.currentTarget.value)}

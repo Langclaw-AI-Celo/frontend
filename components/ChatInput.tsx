@@ -31,7 +31,13 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import type { Experimental_TranscriptionResult } from "ai";
-import { type ComponentType, useCallback, useState } from "react";
+import {
+  type ComponentType,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
@@ -53,6 +59,7 @@ import {
   useTelegramConnectGate,
 } from "@/components/TelegramConnectDialog";
 import { Badge } from "@/components/ui/badge";
+import { createChatStartRequestCoordinator } from "@/lib/latest-request";
 
 const SUBMITTING_TIMEOUT = 200;
 const STREAMING_TIMEOUT = 2000;
@@ -181,8 +188,15 @@ function SpeechTranscriptionPreview({
 
 const ChatInput = () => {
   const router = useRouter();
-  const { clearWalletAuth, isConnected, isSigning, openWalletModal } =
-    useWalletSession();
+  const {
+    address,
+    clearWalletAuth,
+    isConnected,
+    isSigning,
+    openWalletModal,
+  } = useWalletSession();
+  const walletContext =
+    isConnected && address ? address.trim().toLowerCase() : "";
   const { dialog: telegramDialog, requireTelegramLinkedWallet } =
     useTelegramConnectGate();
   const [toolMode, setToolMode] = useState<ChatMode>("chat");
@@ -193,10 +207,63 @@ const ChatInput = () => {
   const [status, setStatus] = useState<
     "submitted" | "streaming" | "ready" | "error"
   >("ready");
+  const [renderedWalletContext, setRenderedWalletContext] =
+    useState(walletContext);
+
+  if (renderedWalletContext !== walletContext) {
+    setRenderedWalletContext(walletContext);
+    setError("");
+    setSpeechSegments([]);
+    setStatus("ready");
+  }
+
+  const chatStartRequestsRef = useRef(
+    createChatStartRequestCoordinator(walletContext),
+  );
+  const chatTimersRef = useRef(new Set<number>());
+
+  const clearChatTimers = useCallback(() => {
+    for (const timer of chatTimersRef.current) {
+      window.clearTimeout(timer);
+    }
+
+    chatTimersRef.current.clear();
+  }, []);
+
+  const scheduleForWallet = useCallback(
+    (requestContext: string, callback: () => void, delay: number) => {
+      const timer = window.setTimeout(() => {
+        chatTimersRef.current.delete(timer);
+
+        if (
+          chatStartRequestsRef.current.isCurrentContext(requestContext)
+        ) {
+          callback();
+        }
+      }, delay);
+
+      chatTimersRef.current.add(timer);
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    chatStartRequestsRef.current.setContext(walletContext);
+    clearChatTimers();
+  }, [clearChatTimers, walletContext]);
+
+  useLayoutEffect(() => {
+    const chatStartRequests = chatStartRequestsRef.current;
+
+    return () => {
+      clearChatTimers();
+      chatStartRequests.invalidateAll();
+    };
+  }, [clearChatTimers]);
 
   const handleSpeechTranscript = useCallback((text: string) => {
     setSpeechSegments((segments) => appendTranscriptionSegment(segments, text));
-  }, []);
+  }, [setSpeechSegments]);
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -217,7 +284,7 @@ const ChatInput = () => {
         return;
       }
 
-      if (!isConnected) {
+      if (!isConnected || !walletContext) {
         openWalletModal();
         showError(
           setError,
@@ -227,37 +294,88 @@ const ChatInput = () => {
         return;
       }
 
+      const requestContext = walletContext;
       setStatus("submitted");
       setError("");
       setSpeechSegments([]);
 
       const startSession = async (forceWalletSignature = false) => {
-        const wallet = await requireTelegramLinkedWallet({
-          force: forceWalletSignature,
-        });
-        const session = createChatSession(text);
+        const outcome: {
+          error?: unknown;
+          failed: boolean;
+          session: ReturnType<typeof createChatSession> | null;
+        } = {
+          failed: false,
+          session: null,
+        };
+        const published =
+          await chatStartRequestsRef.current.runMutation(
+            requestContext,
+            requestContext,
+            async () => {
+              const wallet = await requireTelegramLinkedWallet({
+                force: forceWalletSignature,
+              });
 
-        const promptStored = savePendingPrompt(session.id, {
-          model: resolveChatModel(),
-          researchTrend: toolMode === "research",
-          text,
-          toolMode,
-        });
+              if (
+                !chatStartRequestsRef.current.isCurrentContext(
+                  requestContext,
+                ) ||
+                wallet.address.trim().toLowerCase() !== requestContext
+              ) {
+                throw new Error("Wallet changed. Try again.");
+              }
 
-        if (!promptStored) {
-          throw new Error(
-            "Unable to prepare this chat. Check browser session storage and try again.",
+              const session = createChatSession(text);
+              const promptStored = savePendingPrompt(session.id, {
+                model: resolveChatModel(),
+                researchTrend: toolMode === "research",
+                text,
+                toolMode,
+              });
+
+              if (!promptStored) {
+                throw new Error(
+                  "Unable to prepare this chat. Check browser session storage and try again.",
+                );
+              }
+
+              await upsertChatSession(wallet, session);
+              return session;
+            },
+            {
+              onError: (error) => {
+                outcome.error = error;
+                outcome.failed = true;
+              },
+              onSuccess: (session) => {
+                outcome.session = session;
+                dispatchChatSessionsUpdated();
+              },
+            },
           );
+
+        if (!published) {
+          return null;
         }
 
-        await upsertChatSession(wallet, session);
-        dispatchChatSessionsUpdated();
+        if (outcome.failed) {
+          throw outcome.error;
+        }
 
-        return session;
+        return outcome.session;
       };
 
       try {
         const session = await startSession();
+
+        if (
+          !session ||
+          !chatStartRequestsRef.current.isCurrentContext(requestContext)
+        ) {
+          return;
+        }
+
         setStatus("streaming");
         toast.success("Chat session created", {
           description:
@@ -266,32 +384,58 @@ const ChatInput = () => {
                 : FIXED_CHAT_MODEL_LABEL,
         });
 
-        setTimeout(() => {
-          router.push(`/chat/${session.id}`);
-        }, SUBMITTING_TIMEOUT);
+        scheduleForWallet(
+          requestContext,
+          () => router.push(`/chat/${session.id}`),
+          SUBMITTING_TIMEOUT,
+        );
       } catch (err) {
+        if (
+          !chatStartRequestsRef.current.isCurrentContext(requestContext)
+        ) {
+          return;
+        }
+
         if (isWalletSignatureRequiredError(err)) {
           try {
             clearWalletAuth();
             const session = await startSession(true);
+
+            if (
+              !session ||
+              !chatStartRequestsRef.current.isCurrentContext(requestContext)
+            ) {
+              return;
+            }
+
             setStatus("streaming");
             toast.success("Wallet signature refreshed", {
               description: "Starting the chat session now.",
             });
-            setTimeout(() => {
-              router.push(`/chat/${session.id}`);
-            }, SUBMITTING_TIMEOUT);
+            scheduleForWallet(
+              requestContext,
+              () => router.push(`/chat/${session.id}`),
+              SUBMITTING_TIMEOUT,
+            );
             return;
           } catch (retryErr) {
+            if (
+              !chatStartRequestsRef.current.isCurrentContext(requestContext)
+            ) {
+              return;
+            }
+
             showError(
               setError,
               readFriendlyError(retryErr, "Unable to start the chat session."),
             );
             setStatus("error");
 
-            setTimeout(() => {
-              setStatus("ready");
-            }, STREAMING_TIMEOUT);
+            scheduleForWallet(
+              requestContext,
+              () => setStatus("ready"),
+              STREAMING_TIMEOUT,
+            );
             return;
           }
         }
@@ -307,9 +451,11 @@ const ChatInput = () => {
         );
         setStatus("error");
 
-        setTimeout(() => {
-          setStatus("ready");
-        }, STREAMING_TIMEOUT);
+        scheduleForWallet(
+          requestContext,
+          () => setStatus("ready"),
+          STREAMING_TIMEOUT,
+        );
       }
     },
     [
@@ -318,7 +464,12 @@ const ChatInput = () => {
       openWalletModal,
       requireTelegramLinkedWallet,
       router,
+      scheduleForWallet,
+      setError,
+      setSpeechSegments,
+      setStatus,
       toolMode,
+      walletContext,
     ],
   );
 

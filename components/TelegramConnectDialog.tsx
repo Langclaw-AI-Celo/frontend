@@ -1,6 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Bot,
   CheckCircle2,
@@ -20,7 +25,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useWalletSession } from "@/hooks/use-wallet-session";
+import { tryCopyText } from "@/lib/clipboard";
 import { safeExternalUrl } from "@/lib/external-url";
+import { createTelegramGateRequestCoordinator } from "@/lib/latest-request";
 import {
   createAutomationTelegramLink,
   getAutomationSettings,
@@ -48,7 +55,10 @@ export function isTelegramLinkRequiredError(error: unknown) {
 }
 
 export function useTelegramConnectGate() {
-  const { getWalletAuth, isConnected, openWalletModal } = useWalletSession();
+  const { address, getWalletAuth, isConnected, openWalletModal } =
+    useWalletSession();
+  const walletContext =
+    isConnected && address ? address.trim().toLowerCase() : "";
   const [open, setOpen] = useState(false);
   const [telegramCommand, setTelegramCommand] = useState("");
   const [telegramDeepLink, setTelegramDeepLink] = useState("");
@@ -59,6 +69,9 @@ export function useTelegramConnectGate() {
   const [loading, setLoading] = useState(false);
   const pollTimerRef = useRef<number | null>(null);
   const requiredChainRef = useRef<ProductChainId | undefined>(undefined);
+  const telegramRequestsRef = useRef(
+    createTelegramGateRequestCoordinator(walletContext),
+  );
 
   const clearTelegramPollTimer = useCallback(() => {
     if (pollTimerRef.current !== null) {
@@ -67,18 +80,52 @@ export function useTelegramConnectGate() {
     }
   }, []);
 
-  useEffect(() => {
-    return () => clearTelegramPollTimer();
+  useLayoutEffect(() => {
+    const contextChanged =
+      telegramRequestsRef.current.setContext(walletContext);
+
+    if (!contextChanged) {
+      return;
+    }
+
+    clearTelegramPollTimer();
+    requiredChainRef.current = undefined;
+    setLoading(false);
+    setOpen(false);
+    setTelegramCommand("");
+    setTelegramDeepLink("");
+    setTelegramPolling(false);
+    setTelegramStatus("");
+  }, [clearTelegramPollTimer, walletContext]);
+
+  useLayoutEffect(() => {
+    const telegramRequests = telegramRequestsRef.current;
+
+    return () => {
+      clearTelegramPollTimer();
+      telegramRequests.invalidateAll();
+    };
   }, [clearTelegramPollTimer]);
 
   const startTelegramPolling = useCallback(
     (wallet: WalletAuth, expiresAt: string, botUsername: string) => {
+      const request =
+        telegramRequestsRef.current.beginPoll(walletContext);
+
+      if (!request.isCurrent(wallet.address)) {
+        return;
+      }
+
       const expiresAtMs = new Date(expiresAt).getTime();
       clearTelegramPollTimer();
       setTelegramPolling(true);
       setTelegramStatus(`Waiting for @${botUsername} confirmation...`);
 
       const poll = async () => {
+        if (!request.isCurrent(wallet.address)) {
+          return;
+        }
+
         if (Date.now() >= expiresAtMs) {
           setTelegramPolling(false);
           setTelegramStatus("Telegram link expired. Create a new link.");
@@ -87,6 +134,10 @@ export function useTelegramConnectGate() {
 
         try {
           const payload = await pollAutomationTelegramLink(wallet);
+
+          if (!request.isCurrent(wallet.address)) {
+            return;
+          }
 
           if (payload.linked) {
             setTelegramPolling(false);
@@ -101,6 +152,10 @@ export function useTelegramConnectGate() {
           setTelegramStatus(`Waiting for @${botUsername} confirmation...`);
           pollTimerRef.current = window.setTimeout(poll, 3000);
         } catch (error) {
+          if (!request.isCurrent(wallet.address)) {
+            return;
+          }
+
           const message = readFriendlyError(
             error,
             "Unable to check Telegram link.",
@@ -113,22 +168,33 @@ export function useTelegramConnectGate() {
 
       pollTimerRef.current = window.setTimeout(poll, 1500);
     },
-    [clearTelegramPollTimer],
+    [clearTelegramPollTimer, walletContext],
   );
 
   const requireTelegramLinkedWallet = useCallback(
     async (options: { chain?: ProductChainId; force?: boolean } = {}) => {
-      if (!isConnected) {
+      if (!isConnected || !walletContext) {
         openWalletModal();
         throw new Error("Choose a wallet to continue.");
       }
 
+      const request =
+        telegramRequestsRef.current.beginGate(walletContext);
       requiredChainRef.current = options.chain;
       const wallet = await getWalletAuth({
         chain: options.chain,
         force: options.force,
       });
+
+      if (!request.isCurrent(wallet.address)) {
+        throw new Error("Wallet changed. Try again.");
+      }
+
       const settings = await getAutomationSettings(wallet);
+
+      if (!request.isCurrent(wallet.address)) {
+        throw new Error("Wallet changed. Try again.");
+      }
 
       if (settings.telegramVerified && settings.telegramChatId?.trim()) {
         return wallet;
@@ -138,10 +204,24 @@ export function useTelegramConnectGate() {
       setTelegramStatus("Connect Telegram before running Langclaw.");
       throw new TelegramLinkRequiredError();
     },
-    [getWalletAuth, isConnected, openWalletModal],
+    [
+      getWalletAuth,
+      isConnected,
+      openWalletModal,
+      setOpen,
+      setTelegramStatus,
+      walletContext,
+    ],
   );
 
   const handleConnectTelegram = useCallback(async () => {
+    const request =
+      telegramRequestsRef.current.beginLink(walletContext);
+
+    if (!request.isCurrent()) {
+      return;
+    }
+
     setLoading(true);
     clearTelegramPollTimer();
 
@@ -149,7 +229,19 @@ export function useTelegramConnectGate() {
 
     try {
       const wallet = await getWalletAuth({ chain: requiredChainRef.current });
+
+      if (!request.isCurrent(wallet.address)) {
+        telegramWindow?.close();
+        return;
+      }
+
       const link = await createAutomationTelegramLink(wallet);
+
+      if (!request.isCurrent(wallet.address)) {
+        telegramWindow?.close();
+        return;
+      }
+
       const deepLink = safeExternalUrl(link.deepLink);
 
       if (!deepLink) {
@@ -176,14 +268,31 @@ export function useTelegramConnectGate() {
       });
     } catch (error) {
       telegramWindow?.close();
+
+      if (!request.isCurrent()) {
+        return;
+      }
+
       const message = readFriendlyError(error, "Unable to create Telegram link.");
 
       setTelegramStatus(message);
       toast.error(message);
     } finally {
-      setLoading(false);
+      if (request.isCurrent()) {
+        setLoading(false);
+      }
     }
-  }, [clearTelegramPollTimer, getWalletAuth, startTelegramPolling]);
+  }, [
+    clearTelegramPollTimer,
+    getWalletAuth,
+    setLoading,
+    setTelegramBotUsername,
+    setTelegramCommand,
+    setTelegramDeepLink,
+    setTelegramStatus,
+    startTelegramPolling,
+    walletContext,
+  ]);
 
   const dialog = (
     <TelegramConnectDialog
@@ -232,8 +341,12 @@ function TelegramConnectDialog({
       return;
     }
 
-    await navigator.clipboard.writeText(command);
-    toast.success("Telegram command copied");
+    if (await tryCopyText(command)) {
+      toast.success("Telegram command copied");
+      return;
+    }
+
+    toast.error("Unable to copy Telegram command.");
   };
 
   return (

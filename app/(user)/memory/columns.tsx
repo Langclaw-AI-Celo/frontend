@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { tryCopyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import type { MemoryCategory, MemoryItem, MemoryStatus } from "./types";
 
@@ -276,7 +278,7 @@ export function getMemoryColumns({
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
                 <DropdownMenuItem
-                  onSelect={() => void navigator.clipboard.writeText(memory.id)}
+                  onSelect={() => void copyMemoryId(memory.id)}
                 >
                   <Copy />
                   Copy memory ID
@@ -314,4 +316,13 @@ export function getMemoryColumns({
       },
     },
   ];
+}
+
+async function copyMemoryId(memoryId: string) {
+  if (await tryCopyText(memoryId)) {
+    toast.success("Memory ID copied");
+    return;
+  }
+
+  toast.error("Unable to copy memory ID.");
 }

@@ -195,6 +195,7 @@ export function MemoryDataTable({
             <div className="relative w-full md:max-w-xs">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                aria-label="Search memories"
                 placeholder="Search memories..."
                 value={globalFilter}
                 onChange={(event) => setGlobalFilter(event.target.value)}

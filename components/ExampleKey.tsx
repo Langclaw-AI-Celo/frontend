@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useState } from "react";
+import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "./ui/button";
 import { CheckIcon, CopyIcon } from "lucide-react";
+import { tryCopyText } from "@/lib/clipboard";
 
 const examples = {
   curl: `curl https://api.langclaw.ai/v1/chat/completions \\
@@ -73,7 +75,11 @@ function CodeExample({
   const code = examples[value];
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(code);
+    if (!(await tryCopyText(code))) {
+      toast.error(`Unable to copy the ${language} example.`);
+      return;
+    }
+
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   };

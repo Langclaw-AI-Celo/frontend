@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   CheckIcon,
   CopyIcon,
@@ -47,55 +53,176 @@ import {
   type ApiKeyRecord,
   type WalletAuthPurpose,
 } from "@/lib/langclaw-api";
+import { createApiKeyRequestCoordinator } from "@/lib/latest-request";
 
 export default function CreateKey() {
-  const { getWalletAuth, isConnected, isSigning, openWalletModal } =
+  const { address, getWalletAuth, isConnected, isSigning, openWalletModal } =
     useWalletSession();
-  const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
-  const [name, setName] = useState("");
-  const [secret, setSecret] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState("");
-  const [open, setOpen] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [keysState, setKeys] = useState<ApiKeyRecord[]>([]);
+  const [nameState, setName] = useState("");
+  const [secretState, setSecret] = useState("");
+  const [errorState, setError] = useState("");
+  const [loadingState, setLoading] = useState("");
+  const [openState, setOpen] = useState(false);
+  const [copiedIdState, setCopiedId] = useState<string | null>(null);
+  const [stateContext, setStateContext] = useState("");
+  const walletContext =
+    isConnected && address ? address.trim().toLowerCase() : "";
+  const apiKeyRequestsRef = useRef(
+    createApiKeyRequestCoordinator(walletContext),
+  );
+  const accountStateIsCurrent = stateContext === walletContext;
+  const keys = accountStateIsCurrent ? keysState : [];
+  const name = accountStateIsCurrent ? nameState : "";
+  const secret = accountStateIsCurrent ? secretState : "";
+  const error = accountStateIsCurrent ? errorState : "";
+  const loading = accountStateIsCurrent ? loadingState : "";
+  const open = accountStateIsCurrent ? openState : false;
+  const copiedId = accountStateIsCurrent ? copiedIdState : null;
+
+  const getWalletForContext = useCallback(
+    async (requestContext: string, purpose?: WalletAuthPurpose) => {
+      const wallet = await getWalletAuth(
+        purpose ? { force: true, purpose } : undefined,
+      );
+
+      if (
+        !apiKeyRequestsRef.current.isCurrentContext(requestContext) ||
+        wallet.address.trim().toLowerCase() !== requestContext
+      ) {
+        return null;
+      }
+
+      return wallet;
+    },
+    [getWalletAuth],
+  );
 
   const loadKeys = useCallback(async () => {
-    if (!isConnected) {
-      setKeys([]);
+    const requestContext = walletContext;
+
+    if (
+      !requestContext ||
+      !apiKeyRequestsRef.current.isCurrentContext(requestContext)
+    ) {
       return;
     }
 
     setLoading("list");
     setError("");
 
-    try {
-      const wallet = await getWalletAuth();
-      setKeys(await listApiKeys(wallet));
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to load API keys.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
-  }, [getWalletAuth, isConnected]);
+    await apiKeyRequestsRef.current.runLoad(
+      requestContext,
+      async () => {
+        const wallet = await getWalletForContext(requestContext);
+
+        return wallet ? listApiKeys(wallet) : null;
+      },
+      {
+        onError: (err) => {
+          const message = readFriendlyError(err, "Unable to load API keys.");
+          setError(message);
+          toast.error(message);
+        },
+        onSettled: () => setLoading(""),
+        onSuccess: (payload) => {
+          if (!payload) {
+            return;
+          }
+
+          setStateContext(requestContext);
+          setKeys(payload);
+        },
+      },
+    );
+  }, [getWalletForContext, walletContext]);
+
+  useLayoutEffect(() => {
+    apiKeyRequestsRef.current.setContext(walletContext);
+  }, [walletContext]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      void loadKeys();
+      setKeys([]);
+      setName("");
+      setSecret("");
+      setError("");
+      setLoading("");
+      setOpen(false);
+      setCopiedId(null);
+      setStateContext(walletContext);
+
+      if (walletContext) {
+        void loadKeys();
+      }
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [loadKeys]);
+  }, [loadKeys, walletContext]);
 
-  const requireWallet = async (purpose?: WalletAuthPurpose) => {
-    if (!isConnected) {
-      openWalletModal();
-      throw new Error("Choose a wallet to manage API keys.");
-    }
+  useEffect(() => {
+    const apiKeyRequests = apiKeyRequestsRef.current;
 
-    return getWalletAuth(purpose ? { force: true, purpose } : undefined);
-  };
+    return () => apiKeyRequests.invalidateAll();
+  }, []);
+
+  const runApiKeyMutation = useCallback(
+    async <T,>(
+      nextLoading: string,
+      fallbackError: string,
+      purpose: WalletAuthPurpose | undefined,
+      operation: (
+        wallet: NonNullable<
+          Awaited<ReturnType<typeof getWalletForContext>>
+        >,
+      ) => Promise<T>,
+      onSuccess: (value: T) => void,
+    ) => {
+      const requestContext = walletContext;
+
+      if (!requestContext) {
+        const message = "Choose a wallet to manage API keys.";
+        setStateContext("");
+        setError(message);
+        toast.error(message);
+        openWalletModal();
+        return false;
+      }
+
+      setLoading(nextLoading);
+      setError("");
+
+      return apiKeyRequestsRef.current.runMutation(
+        requestContext,
+        async () => {
+          const wallet = await getWalletForContext(requestContext, purpose);
+
+          if (!wallet) {
+            return null;
+          }
+
+          return { value: await operation(wallet) };
+        },
+        {
+          onError: (err) => {
+            const message = readFriendlyError(err, fallbackError);
+            setError(message);
+            toast.error(message);
+          },
+          onSettled: () => setLoading(""),
+          onSuccess: (result) => {
+            if (!result) {
+              return;
+            }
+
+            setStateContext(requestContext);
+            onSuccess(result.value);
+          },
+        },
+      );
+    },
+    [getWalletForContext, openWalletModal, walletContext],
+  );
 
   const handleCreate = async () => {
     const trimmedName = name.trim();
@@ -105,44 +232,34 @@ export default function CreateKey() {
       return;
     }
 
-    setLoading("create");
-    setError("");
-
-    try {
-      const wallet = await requireWallet("api-key:create");
-      const payload = await createApiKey(wallet, trimmedName);
-      setKeys((current) => [payload.key, ...current]);
-      setSecret(payload.secret);
-      setName("");
-      setOpen(false);
-      toast.success("API key created");
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to create API key.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await runApiKeyMutation(
+      "create",
+      "Unable to create API key.",
+      "api-key:create",
+      (wallet) => createApiKey(wallet, trimmedName),
+      (payload) => {
+        setKeys((current) => [payload.key, ...current]);
+        setSecret(payload.secret);
+        setName("");
+        setOpen(false);
+        toast.success("API key created");
+      },
+    );
   };
 
   const handleRevoke = async (keyId: string) => {
-    setLoading(keyId);
-    setError("");
-
-    try {
-      const wallet = await requireWallet();
-      const revoked = await revokeApiKey(wallet, keyId);
-      setKeys((current) =>
-        current.map((key) => (key.id === keyId ? revoked : key)),
-      );
-      toast.success("API key revoked");
-    } catch (err) {
-      const message = readFriendlyError(err, "Unable to revoke API key.");
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading("");
-    }
+    await runApiKeyMutation(
+      keyId,
+      "Unable to revoke API key.",
+      undefined,
+      (wallet) => revokeApiKey(wallet, keyId),
+      (revoked) => {
+        setKeys((current) =>
+          current.map((key) => (key.id === keyId ? revoked : key)),
+        );
+        toast.success("API key revoked");
+      },
+    );
   };
 
   const copyToClipboard = async (text: string, id: string) => {
@@ -151,12 +268,24 @@ export default function CreateKey() {
     }
 
     try {
+      const requestContext = walletContext;
       await navigator.clipboard.writeText(text);
+
+      if (!apiKeyRequestsRef.current.isCurrentContext(requestContext)) {
+        return;
+      }
+
       setCopiedId(id);
       toast.success("Copied to clipboard");
-      window.setTimeout(() => setCopiedId(null), 1500);
+      window.setTimeout(() => {
+        if (apiKeyRequestsRef.current.isCurrentContext(requestContext)) {
+          setCopiedId(null);
+        }
+      }, 1500);
     } catch {
-      toast.error("Could not copy to clipboard");
+      if (apiKeyRequestsRef.current.isCurrentContext(walletContext)) {
+        toast.error("Could not copy to clipboard");
+      }
     }
   };
 

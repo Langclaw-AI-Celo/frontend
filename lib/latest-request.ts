@@ -253,6 +253,10 @@ export function createWatchlistRequestCoordinator(initialContext: string) {
   return createMemoryRequestCoordinator(initialContext);
 }
 
+export function createAutomationRequestCoordinator(initialContext: string) {
+  return createMemoryRequestCoordinator(initialContext);
+}
+
 export function createProofsRequestCoordinator(initialContext: string) {
   const loadGuard = createLatestRequestGuard();
   let currentContext = initialContext;

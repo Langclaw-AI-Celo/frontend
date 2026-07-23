@@ -488,7 +488,10 @@ export default function Page() {
               </div>
 
               <Select onValueChange={setStatusFilter} value={statusFilter}>
-                <SelectTrigger className="w-[148px] md:ml-auto">
+                <SelectTrigger
+                  aria-label="Filter task status"
+                  className="w-[148px] md:ml-auto"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -651,7 +654,7 @@ export default function Page() {
                 }
                 value={form.triggerType}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger aria-label="Trigger type" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -671,7 +674,10 @@ export default function Page() {
                     }
                     value={form.scheduleFrequency}
                   >
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger
+                      aria-label="Schedule frequency"
+                      className="w-full"
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -681,6 +687,7 @@ export default function Page() {
                     </SelectContent>
                   </Select>
                   <Input
+                    aria-label="Schedule time"
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -712,7 +719,10 @@ export default function Page() {
                 }
                 value={form.status}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger
+                  aria-label="Initial task status"
+                  className="w-full"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

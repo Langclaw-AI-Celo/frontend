@@ -89,6 +89,7 @@ import {
   shouldDisableChainSelection,
   shouldResetMiniPayChain,
 } from "@/lib/latest-request";
+import { tryCopyText } from "@/lib/clipboard";
 import { isMiniPayProvider } from "@/lib/minipay";
 import { cn } from "@/lib/utils";
 
@@ -1672,7 +1673,11 @@ function CopyField({
       return;
     }
 
-    await navigator.clipboard.writeText(value);
+    if (!(await tryCopyText(value))) {
+      toast.error(`Unable to copy ${label}.`);
+      return;
+    }
+
     onCopy(label);
     window.setTimeout(() => onCopy(""), 1200);
   };

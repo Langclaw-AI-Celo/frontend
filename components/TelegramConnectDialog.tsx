@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useWalletSession } from "@/hooks/use-wallet-session";
+import { tryCopyText } from "@/lib/clipboard";
 import { safeExternalUrl } from "@/lib/external-url";
 import { createTelegramGateRequestCoordinator } from "@/lib/latest-request";
 import {
@@ -340,8 +341,12 @@ function TelegramConnectDialog({
       return;
     }
 
-    await navigator.clipboard.writeText(command);
-    toast.success("Telegram command copied");
+    if (await tryCopyText(command)) {
+      toast.success("Telegram command copied");
+      return;
+    }
+
+    toast.error("Unable to copy Telegram command.");
   };
 
   return (

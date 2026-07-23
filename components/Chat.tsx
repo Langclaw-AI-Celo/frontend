@@ -165,6 +165,7 @@ import {
   createChatPersistenceQueue,
   createChatSessionsRequestCoordinator,
 } from "@/lib/latest-request";
+import { tryCopyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 type ChatProps = {
@@ -948,7 +949,7 @@ const Chat = ({ sessionId }: ChatProps) => {
                         </MessageAction>
                         <MessageAction
                           label="Copy"
-                          onClick={() => navigator.clipboard.writeText(content)}
+                          onClick={() => void copyChatResponse(content)}
                           tooltip="Copy response"
                         >
                           <CopyIcon className="size-3" />
@@ -3102,6 +3103,15 @@ function appendTranscriptionSegment(
       text: transcript,
     },
   ];
+}
+
+async function copyChatResponse(content: string) {
+  if (await tryCopyText(content)) {
+    toast.success("Response copied");
+    return;
+  }
+
+  toast.error("Unable to copy response.");
 }
 
 export default Chat;

@@ -5,7 +5,7 @@ export function safeExternalUrl(value: unknown) {
 
   const candidate = value.trim();
 
-  if (!candidate) {
+  if (!candidate || /[\u0000-\u001f\u007f]/.test(candidate)) {
     return undefined;
   }
 

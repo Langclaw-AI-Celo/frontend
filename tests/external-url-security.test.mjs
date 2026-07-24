@@ -48,3 +48,15 @@ test("external links reject the reserved port zero", () => {
   );
   assert.equal(safeExternalUrl("https://example.com:65536/support"), undefined);
 });
+
+test("external links reject embedded control characters", () => {
+  for (const value of [
+    "https://trusted.example\n.evil.example/support",
+    "https://example.com/pa\tth",
+    "https://example.com/\rredirect",
+    "https://example.com/\0hidden",
+    "https://example.com/\u007fhidden",
+  ]) {
+    assert.equal(safeExternalUrl(value), undefined, JSON.stringify(value));
+  }
+});

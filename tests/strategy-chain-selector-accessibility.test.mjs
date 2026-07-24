@@ -23,3 +23,13 @@ test("Strategy Lab names its standalone chain selector", () => {
     "Expected the Strategy Lab chain selector to expose an accessible name.",
   );
 });
+
+test("Strategy Lab names its pair selector", () => {
+  const source = readFileSync(strategyPagePath, "utf8");
+
+  assert.match(
+    source,
+    /<SelectTrigger\s+aria-label="Strategy pair"\s+className="w-full">/,
+    "Expected the Strategy Lab pair selector to expose an accessible name.",
+  );
+});

@@ -34,3 +34,17 @@ test("external URL hostnames tolerate malformed source data", () => {
   assert.equal(externalUrlHostname("not a url"), undefined);
   assert.equal(externalUrlHostname("javascript:alert(1)"), undefined);
 });
+
+test("external links reject the reserved port zero", () => {
+  assert.equal(safeExternalUrl("https://example.com:0/support"), undefined);
+  assert.equal(safeExternalUrl("http://localhost:0/health"), undefined);
+  assert.equal(
+    safeExternalUrl("https://example.com:1/support"),
+    "https://example.com:1/support",
+  );
+  assert.equal(
+    safeExternalUrl("https://example.com:65535/support"),
+    "https://example.com:65535/support",
+  );
+  assert.equal(safeExternalUrl("https://example.com:65536/support"), undefined);
+});

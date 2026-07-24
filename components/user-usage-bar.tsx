@@ -205,8 +205,8 @@ function useUserUsageBarModel(): UserUsageBarModel {
 
   const onChainChange = useCallback(
     (value: string) => {
-      const nextChainId = parseProductChainId(value);
-      const nextChain = resolveProductChain(nextChainId);
+      const nextChain = resolveProductChain(value);
+      const nextChainId = nextChain.id;
 
       setError("");
 
@@ -889,10 +889,6 @@ function resolveProductChainId(chainId: number): ProductChainId {
     productChainOptions.find((chain) => chain.chainId === chainId)?.id ??
     defaultProductChain
   );
-}
-
-function parseProductChainId(value: string): ProductChainId {
-  return value === "celo" ? "celo" : defaultProductChain;
 }
 
 function formatTokenAmount(value: string) {

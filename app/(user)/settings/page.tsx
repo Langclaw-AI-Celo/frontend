@@ -736,7 +736,7 @@ export default function Page() {
                   }
                   value={settings?.failureNotification ?? "email"}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger aria-label="Failure alerts" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -920,7 +920,7 @@ export default function Page() {
                   }
                   value={settings?.retryPolicy ?? "3-attempts"}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger aria-label="Retry policy" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -940,7 +940,7 @@ export default function Page() {
                   }
                   value={settings?.limitBehavior ?? "pause"}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger aria-label="Limit behavior" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1004,7 +1004,10 @@ export default function Page() {
                   }
                   value={settings?.thresholdAction ?? "notify"}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger
+                    aria-label="Low balance action"
+                    className="w-full"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

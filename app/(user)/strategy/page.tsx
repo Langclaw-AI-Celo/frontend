@@ -470,7 +470,7 @@ export default function StrategyPage() {
               <label className="flex flex-col gap-2 text-sm">
                 <span className="font-medium">{chainConfig.name} pair</span>
                 <Select onValueChange={setSelectedPair} value={selectedPair}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger aria-label="Strategy pair" className="w-full">
                     <SelectValue placeholder="Select a pair" />
                   </SelectTrigger>
                   <SelectContent>

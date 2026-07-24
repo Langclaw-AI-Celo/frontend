@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertCircleIcon,
   DatabaseIcon,
@@ -45,6 +51,7 @@ import {
   resolveProductChain,
   type ProductChain,
 } from "@/lib/chains";
+import { createUsageRequestCoordinator } from "@/lib/latest-request";
 import { isMiniPayProvider } from "@/lib/minipay";
 import { cn } from "@/lib/utils";
 
@@ -259,61 +266,144 @@ function useUsageBalanceState({
   isConnected,
   selectedChain,
 }: UseUsageBalanceStateParams) {
-  const [balance, setBalance] = useState<UsageBalancePayload | null>(null);
-  const [error, setError] = useState("");
-  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
-  const requestIdRef = useRef(0);
+  const requestAddress =
+    isConnected && address ? address.trim().toLowerCase() : "";
+  const usageContext = requestAddress
+    ? `${requestAddress}:${selectedChain}`
+    : "";
+  const [balanceState, setBalanceState] = useState<{
+    balance: UsageBalancePayload | null;
+    context: string;
+    error: string;
+    isLoading: boolean;
+  }>({
+    balance: null,
+    context: "",
+    error: "",
+    isLoading: false,
+  });
+  const usageBalanceRequestsRef = useRef(
+    createUsageRequestCoordinator(usageContext),
+  );
+  const balanceStateIsCurrent = balanceState.context === usageContext;
+  const balance = balanceStateIsCurrent ? balanceState.balance : null;
+  const error = balanceStateIsCurrent ? balanceState.error : "";
+  const isLoadingBalance =
+    balanceStateIsCurrent && balanceState.isLoading;
 
   const resetBalance = useCallback(() => {
-    setBalance(null);
-    setError("");
-    setIsLoadingBalance(false);
-  }, []);
+    usageBalanceRequestsRef.current.invalidateBalance();
+    setBalanceState({
+      balance: null,
+      context: usageContext,
+      error: "",
+      isLoading: false,
+    });
+  }, [usageContext]);
+
+  const setError = useCallback(
+    (nextError: string) => {
+      setBalanceState((current) => ({
+        balance:
+          current.context === usageContext ? current.balance : null,
+        context: usageContext,
+        error: nextError,
+        isLoading:
+          current.context === usageContext && current.isLoading,
+      }));
+    },
+    [usageContext],
+  );
 
   const refreshBalance = useCallback(async () => {
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
+    const requestContext = usageContext;
 
-    if (!isConnected || !address) {
+    if (!requestContext || !requestAddress || !address) {
       resetBalance();
       return;
     }
 
-    setIsLoadingBalance(true);
-    setError("");
+    setBalanceState((current) => ({
+      balance:
+        current.context === requestContext ? current.balance : null,
+      context: requestContext,
+      error: "",
+      isLoading: true,
+    }));
 
-    try {
-      const cachedWallet = readCachedWalletAuth(address, selectedChain);
+    await usageBalanceRequestsRef.current.runBalance(
+      requestContext,
+      async () => {
+        const cachedWallet = readCachedWalletAuth(address, selectedChain);
 
-      if (isMiniPayProvider() && !cachedWallet) {
-        setBalance(null);
-        setIsLoadingBalance(false);
-        return;
-      }
+        if (isMiniPayProvider() && !cachedWallet) {
+          return null;
+        }
 
-      const wallet = cachedWallet ?? (await getWalletAuth({ chain: selectedChain }));
-      const payload = await getUsageBalance(wallet, selectedChain);
+        const wallet =
+          cachedWallet ??
+          (await getWalletAuth({ chain: selectedChain }));
 
-      if (requestIdRef.current === requestId) {
-        setBalance(payload);
-      }
-    } catch (err) {
-      if (requestIdRef.current !== requestId) {
-        return;
-      }
+        if (
+          wallet.address.trim().toLowerCase() !== requestAddress
+        ) {
+          return null;
+        }
 
-      const message = readFriendlyError(
-        err,
-        `Unable to load ${chainName} usage balance.`,
-      );
-      setError(message);
-      toast.error(message);
-    } finally {
-      if (requestIdRef.current === requestId) {
-        setIsLoadingBalance(false);
-      }
-    }
-  }, [address, chainName, getWalletAuth, isConnected, resetBalance, selectedChain]);
+        return getUsageBalance(wallet, selectedChain);
+      },
+      {
+        onError: (err) => {
+          const message = readFriendlyError(
+            err,
+            `Unable to load ${chainName} usage balance.`,
+          );
+          setBalanceState((current) => ({
+            balance:
+              current.context === requestContext
+                ? current.balance
+                : null,
+            context: requestContext,
+            error: message,
+            isLoading: true,
+          }));
+          toast.error(message);
+        },
+        onSettled: () => {
+          setBalanceState((current) => ({
+            balance:
+              current.context === requestContext
+                ? current.balance
+                : null,
+            context: requestContext,
+            error:
+              current.context === requestContext ? current.error : "",
+            isLoading: false,
+          }));
+        },
+        onSuccess: (payload) => {
+          setBalanceState({
+            balance: payload,
+            context: requestContext,
+            error: "",
+            isLoading: true,
+          });
+        },
+      },
+    );
+  }, [
+    address,
+    chainName,
+    getWalletAuth,
+    requestAddress,
+    resetBalance,
+    selectedChain,
+    usageContext,
+  ]);
+
+  useLayoutEffect(() => {
+    usageBalanceRequestsRef.current.setContext(usageContext);
+  }, [usageContext]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -322,6 +412,14 @@ function useUsageBalanceState({
 
     return () => window.clearTimeout(timeoutId);
   }, [refreshBalance]);
+
+  useEffect(() => {
+    const usageBalanceRequests = usageBalanceRequestsRef.current;
+
+    return () => {
+      usageBalanceRequests.invalidateBalance();
+    };
+  }, []);
 
   useEffect(() => {
     const handleWalletAuthUpdated = () => {

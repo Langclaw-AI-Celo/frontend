@@ -20,7 +20,8 @@ export function safeExternalUrl(value: unknown) {
     if (
       (url.protocol !== "https:" && !isLocalHttp) ||
       url.username ||
-      url.password
+      url.password ||
+      url.port === "0"
     ) {
       return undefined;
     }

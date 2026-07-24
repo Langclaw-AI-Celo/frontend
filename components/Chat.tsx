@@ -164,6 +164,7 @@ import {
 import {
   createChatPersistenceQueue,
   createChatSessionsRequestCoordinator,
+  createWatchlistRequestCoordinator,
 } from "@/lib/latest-request";
 import { tryCopyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
@@ -1392,6 +1393,7 @@ function RouterUsageTooltip({
 
 function OnChainDetails({ payload }: { payload: OnChainToolFinalPayload }) {
   const {
+    address,
     clearWalletAuth,
     getWalletAuth,
     hasCachedWalletAuth,
@@ -1399,32 +1401,82 @@ function OnChainDetails({ payload }: { payload: OnChainToolFinalPayload }) {
     openWalletModal,
   } = useWalletSession();
   const watchlistItem = useMemo(() => buildAlphaWatchlistItem(payload), [payload]);
-  const [isWatchlisted, setIsWatchlisted] = useState(false);
-  const [isSavingWatchlist, setIsSavingWatchlist] = useState(false);
+  const walletContext =
+    isConnected && address ? address.trim().toLowerCase() : "";
+  const watchlistViewContext = useMemo(
+    () => ({ itemId: watchlistItem.id, walletContext }),
+    [walletContext, watchlistItem.id],
+  );
+  const [watchlistState, setWatchlistState] = useState<{
+    context: typeof watchlistViewContext | null;
+    isWatchlisted: boolean;
+  }>({
+    context: null,
+    isWatchlisted: false,
+  });
+  const [savingWatchlistContext, setSavingWatchlistContext] = useState<
+    typeof watchlistViewContext | null
+  >(null);
+  const isWatchlisted =
+    watchlistState.context === watchlistViewContext &&
+    watchlistState.isWatchlisted;
+  const isSavingWatchlist =
+    savingWatchlistContext === watchlistViewContext;
+  const watchlistRequestsRef = useRef(
+    createWatchlistRequestCoordinator(walletContext),
+  );
+
+  useLayoutEffect(() => {
+    watchlistRequestsRef.current.setContext(walletContext);
+  }, [walletContext]);
 
   useEffect(() => {
-    let active = true;
-
     const syncWatchlistState = async () => {
-      if (!isConnected || !hasCachedWalletAuth) {
-        setIsWatchlisted(false);
+      const requestContext = walletContext;
+      const requestViewContext = watchlistViewContext;
+
+      if (!requestContext || !hasCachedWalletAuth) {
+        setWatchlistState({
+          context: requestViewContext,
+          isWatchlisted: false,
+        });
         return;
       }
 
-      try {
-        const wallet = await getWalletAuth();
-        const items = await listAlphaWatchlist(wallet);
+      await watchlistRequestsRef.current.runLoad(
+        requestContext,
+        async () => {
+          const wallet = await getWalletAuth();
 
-        if (active) {
-          setIsWatchlisted(
-            items.some((item) => item.id === watchlistItem.id)
-          );
-        }
-      } catch {
-        if (active) {
-          setIsWatchlisted(false);
-        }
-      }
+          if (
+            wallet.address.trim().toLowerCase() !== requestContext
+          ) {
+            return null;
+          }
+
+          return listAlphaWatchlist(wallet);
+        },
+        {
+          onError: () => {
+            setWatchlistState({
+              context: requestViewContext,
+              isWatchlisted: false,
+            });
+          },
+          onSuccess: (items) => {
+            if (!items) {
+              return;
+            }
+
+            setWatchlistState({
+              context: requestViewContext,
+              isWatchlisted: items.some(
+                (item) => item.id === watchlistItem.id,
+              ),
+            });
+          },
+        },
+      );
     };
 
     void syncWatchlistState();
@@ -1434,43 +1486,94 @@ function OnChainDetails({ payload }: { payload: OnChainToolFinalPayload }) {
     );
 
     return () => {
-      active = false;
       window.removeEventListener(
         LANGCLAW_ALPHA_WATCHLIST_UPDATED_EVENT,
         syncWatchlistState,
       );
     };
-  }, [getWalletAuth, hasCachedWalletAuth, isConnected, watchlistItem.id]);
+  }, [
+    getWalletAuth,
+    hasCachedWalletAuth,
+    walletContext,
+    watchlistItem.id,
+    watchlistViewContext,
+  ]);
+
+  useEffect(() => {
+    const watchlistRequests = watchlistRequestsRef.current;
+
+    return () => {
+      watchlistRequests.invalidateAll();
+    };
+  }, []);
 
   const handleAddToWatchlist = async () => {
     if (isWatchlisted) {
       return;
     }
 
-    if (!isConnected) {
+    const requestContext = walletContext;
+    const requestViewContext = watchlistViewContext;
+
+    if (!requestContext) {
       openWalletModal();
       toast.error("Connect your wallet to save the watchlist.");
       return;
     }
 
-    setIsSavingWatchlist(true);
+    setSavingWatchlistContext(requestViewContext);
 
-    try {
-      const wallet = await getWalletAuth();
-      await upsertAlphaWatchlistItem(wallet, watchlistItem);
-      setIsWatchlisted(true);
-      dispatchAlphaWatchlistUpdated();
-      toast.success("Watchlist added", {
-        description: payload.title,
-      });
-    } catch (error) {
-      if (isWalletSignatureRequiredError(error)) {
-        clearWalletAuth();
-      }
+    const handled = await watchlistRequestsRef.current.runMutation(
+      requestContext,
+      requestContext,
+      async () => {
+        const wallet = await getWalletAuth();
 
-      toast.error(readFriendlyError(error, "Unable to save watchlist item."));
-    } finally {
-      setIsSavingWatchlist(false);
+        if (
+          wallet.address.trim().toLowerCase() !== requestContext
+        ) {
+          return false;
+        }
+
+        await upsertAlphaWatchlistItem(wallet, watchlistItem);
+        return true;
+      },
+      {
+        onError: (error) => {
+          if (isWalletSignatureRequiredError(error)) {
+            clearWalletAuth();
+          }
+
+          toast.error(
+            readFriendlyError(error, "Unable to save watchlist item."),
+          );
+        },
+        onSettled: () => {
+          setSavingWatchlistContext((current) =>
+            current === requestViewContext ? null : current,
+          );
+        },
+        onSuccess: (saved) => {
+          if (!saved) {
+            return;
+          }
+
+          setWatchlistState({
+            context: requestViewContext,
+            isWatchlisted: true,
+          });
+          dispatchAlphaWatchlistUpdated();
+          toast.success("Watchlist added", {
+            description: payload.title,
+          });
+        },
+      },
+    );
+
+    if (!handled) {
+      setSavingWatchlistContext((current) =>
+        current === requestViewContext ? null : current,
+      );
     }
   };
 
